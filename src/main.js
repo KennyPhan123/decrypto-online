@@ -530,12 +530,12 @@ function renderGuessForm(guessType, title) {
         ${[0, 1, 2].map(i => `
           <div class="guess-select-group">
             <span class="guess-label">Gợi ý ${['A', 'B', 'C'][i]}</span>
-            <select class="guess-select" id="guess-${i}">
+            <select class="guess-select" id="guess-${i}" onchange="this.style.color = this.options[this.selectedIndex].style.color">
               <option value="">?</option>
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
+              <option value="1" style="color:${KW_COLORS[0]}; font-weight:bold;">1</option>
+              <option value="2" style="color:${KW_COLORS[1]}; font-weight:bold;">2</option>
+              <option value="3" style="color:${KW_COLORS[2]}; font-weight:bold;">3</option>
+              <option value="4" style="color:${KW_COLORS[3]}; font-weight:bold;">4</option>
             </select>
           </div>
         `).join('')}
