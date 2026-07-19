@@ -473,9 +473,19 @@ function renderGuessPhase(area) {
 
   let html = '';
 
-  // Show clues
-  html += `
-    <div class="clues-display fade-in">
+  if (s.mode === '3p') {
+    html += renderGuess3P(clues);
+  } else {
+    html += renderGuessTeam(clues);
+  }
+
+  area.innerHTML = html;
+  attachGuessHandlers();
+}
+
+function renderCluesOnly(clues) {
+  return `
+    <div class="clues-display fade-in" style="margin-bottom:14px">
       <div class="clues-display-header">Gợi ý</div>
       ${clues.map((c, i) => `
         <div class="clue-display-item">
@@ -485,50 +495,41 @@ function renderGuessPhase(area) {
       `).join('')}
     </div>
   `;
-
-  // Determine what this player can do
-  if (s.mode === '3p') {
-    html += renderGuess3P();
-  } else {
-    html += renderGuessTeam();
-  }
-
-  area.innerHTML = html;
-  attachGuessHandlers();
 }
 
-function renderGuess3P() {
+function renderGuess3P(clues) {
   const s = state;
   let html = '';
 
   if (s.myRole === 'encryptor' && s.currentEncryptorId === s.myId) {
-    // Current encryptor: just watch
+    html += renderCluesOnly(clues);
     html += `<div class="waiting-indicator">Bạn là người mã hóa — Hãy chờ đồng đội đoán</div>`;
   } else if (s.myRole === 'interceptor') {
     if (s.round < 2) {
+      html += renderCluesOnly(clues);
       html += `<div class="waiting-indicator">Vòng 1 — Chưa thể chặn mã</div>`;
-      // Still need to wait for decrypt
       if (!s.decryptSubmitted) {
         html += `<div class="waiting-indicator">Đang chờ đội mã hóa đoán<span class="waiting-dots"></span></div>`;
       }
     } else if (s.interceptSubmitted) {
+      html += renderCluesOnly(clues);
       html += `<div class="guess-submitted">Bạn đã gửi dự đoán<span class="waiting-dots"></span></div>`;
     } else {
-      html += renderGuessForm('intercept', 'Chặn mã');
+      html += renderGuessForm('intercept', 'Chặn mã', clues, null);
     }
   } else {
-    // Guesser (other encryptor)
     if (s.decryptSubmitted) {
+      html += renderCluesOnly(clues);
       html += `<div class="guess-submitted">Đội bạn đã gửi dự đoán<span class="waiting-dots"></span></div>`;
     } else {
-      html += renderGuessForm('decrypt', 'Giải mã');
+      html += renderGuessForm('decrypt', 'Giải mã', clues, s.keywords);
     }
   }
 
   return html;
 }
 
-function renderGuessTeam() {
+function renderGuessTeam(clues) {
   const s = state;
   const turnTeam = s.currentTeamTurn;
   const isMyTeamTurn = s.myTeam === turnTeam;
@@ -536,50 +537,56 @@ function renderGuessTeam() {
   let html = '';
 
   if (isMyTeamTurn) {
-    // My team is decrypting
     const teamData = turnTeam === 'A' ? s.teamA : s.teamB;
     const isEncryptor = teamData.encryptorId === s.myId;
 
     if (isEncryptor) {
+      html += renderCluesOnly(clues);
       html += `<div class="waiting-indicator">Bạn là người mã hóa — Không được gợi ý</div>`;
     } else if (s.decryptSubmitted) {
+      html += renderCluesOnly(clues);
       html += `<div class="guess-submitted">Đội bạn đã gửi dự đoán. Đang chờ đội ${oppTeam}<span class="waiting-dots"></span></div>`;
     } else {
-      html += renderGuessForm('decrypt', 'Giải mã');
+      html += renderGuessForm('decrypt', 'Giải mã', clues, teamData.keywords);
     }
   } else {
-    // My team is intercepting
     if (s.round < 2) {
+      html += renderCluesOnly(clues);
       html += `<div class="waiting-indicator">Vòng 1 — Chưa thể chặn mã</div>`;
     } else if (s.interceptSubmitted) {
+      html += renderCluesOnly(clues);
       html += `<div class="guess-submitted">Đội bạn đã gửi dự đoán<span class="waiting-dots"></span></div>`;
     } else {
-      html += renderGuessForm('intercept', 'Chặn mã');
+      html += renderGuessForm('intercept', 'Chặn mã', clues, null);
     }
   }
 
   return html;
 }
 
-function renderGuessForm(guessType, title) {
+function renderGuessForm(guessType, title, clues, keywords) {
   return `
     <div class="guess-section fade-in">
       <div class="guess-section-title">${title}</div>
-      <div class="guess-inputs">
+      <div class="guess-connection-container">
         ${[0, 1, 2].map(i => `
-          <div class="guess-select-group">
-            <span class="guess-label">Gợi ý ${['A', 'B', 'C'][i]}</span>
-            <select class="guess-select" id="guess-${i}" onchange="this.style.color = this.options[this.selectedIndex].style.color">
-              <option value="">?</option>
-              <option value="1" style="color:${KW_COLORS[0]}; font-weight:bold;">1</option>
-              <option value="2" style="color:${KW_COLORS[1]}; font-weight:bold;">2</option>
-              <option value="3" style="color:${KW_COLORS[2]}; font-weight:bold;">3</option>
-              <option value="4" style="color:${KW_COLORS[3]}; font-weight:bold;">4</option>
-            </select>
+          <div class="guess-connection-row" id="guess-row-${i}" data-clue-index="${i}">
+            <div class="guess-clue-box">
+              <div class="clue-number" style="background:var(--text-muted)">${['A', 'B', 'C'][i]}</div>
+              <span>${esc(clues[i])}</span>
+            </div>
+            <div class="guess-options">
+              ${[1, 2, 3, 4].map(num => `
+                <button class="guess-opt" data-val="${num}">
+                  <span class="kw-number" style="background:${KW_COLORS[num-1]}">${num}</span>
+                  ${keywords ? `<span>${esc(keywords[num-1])}</span>` : ''}
+                </button>
+              `).join('')}
+            </div>
           </div>
         `).join('')}
       </div>
-      <button class="btn btn-primary" id="btn-submit-guess" data-type="${guessType}">Gửi</button>
+      <button class="btn btn-primary" id="btn-submit-guess" data-type="${guessType}" disabled>Gửi</button>
     </div>
   `;
 }
@@ -588,17 +595,34 @@ function attachGuessHandlers() {
   const btn = $('btn-submit-guess');
   if (!btn) return;
 
-  btn.addEventListener('click', () => {
-    const guessType = btn.dataset.type;
-    const guess = [0, 1, 2].map(i => {
-      const val = $(`guess-${i}`)?.value;
-      return val ? parseInt(val) : 0;
-    });
+  const rows = [0, 1, 2].map(i => $(`guess-row-${i}`));
+  const selections = { 0: null, 1: null, 2: null };
 
-    if (guess.some(n => n < 1 || n > 4)) {
-      showToast('Vui lòng chọn đủ 3 số');
-      return;
-    }
+  rows.forEach((row, rowIndex) => {
+    if (!row) return;
+    const opts = row.querySelectorAll('.guess-opt');
+    opts.forEach(opt => {
+      opt.addEventListener('click', () => {
+        // Clear all in this row
+        opts.forEach(o => o.classList.remove('selected', 'kw-1', 'kw-2', 'kw-3', 'kw-4'));
+        
+        const val = parseInt(opt.dataset.val);
+        selections[rowIndex] = val;
+        
+        opt.classList.add('selected', `kw-${val}`);
+        
+        // Enable submit if all 3 are selected
+        if (selections[0] && selections[1] && selections[2]) {
+          btn.disabled = false;
+        }
+      });
+    });
+  });
+
+  btn.addEventListener('click', () => {
+    if (!selections[0] || !selections[1] || !selections[2]) return;
+    const guess = [selections[0], selections[1], selections[2]];
+    const guessType = btn.dataset.type;
 
     send({ type: 'submit-guess', guess, guessType });
     btn.disabled = true;

@@ -721,45 +721,78 @@ body {
   color: var(--text);
 }
 
-.guess-inputs {
+.guess-connection-container {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 12px;
   margin-bottom: 14px;
 }
 
-.guess-select-group {
-  flex: 1;
+.guess-connection-row {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-
-.guess-label {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.guess-select {
-  width: 100%;
-  padding: 10px 8px;
-  border: 1.5px solid var(--border);
+  gap: 8px;
+  background: var(--surface-alt);
+  padding: 12px;
   border-radius: var(--radius);
-  font-family: inherit;
-  font-size: 16px;
+  border: 1px solid var(--border-light);
+}
+
+.guess-clue-box {
+  font-size: 15px;
   font-weight: 600;
-  text-align: center;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.guess-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.guess-opt {
+  flex: 1;
+  min-width: 48px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
   background: var(--surface);
   color: var(--text);
-  outline: none;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  transition: border-color var(--transition);
+  transition: all var(--transition);
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
-.guess-select:focus {
-  border-color: var(--primary);
+.guess-opt:hover {
+  border-color: var(--border-dark, #ccc);
+}
+
+.guess-opt.selected {
+  border-color: var(--opt-color);
+  background: var(--opt-bg);
+  color: var(--text);
+}
+
+.guess-opt .kw-number {
+  font-size: 12px;
+  font-weight: 700;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: white;
+  flex-shrink: 0;
 }
 
 .guess-submitted {
@@ -930,6 +963,7 @@ body {
 
 .history-table .kw-cell {
   text-align: center;
+  font-weight: 600;
 }
 
 .history-empty {
