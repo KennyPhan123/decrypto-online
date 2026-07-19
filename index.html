@@ -25,17 +25,15 @@
           <label for="player-name">Tên của bạn</label>
           <input type="text" id="player-name" placeholder="Nhập tên..." maxlength="20" autocomplete="off" />
         </div>
-
-        <button id="btn-create" class="btn btn-primary">Tạo phòng</button>
-
-        <div class="divider"><span>hoặc</span></div>
-
+        
         <div class="input-group">
-          <label for="room-code-input">Mã phòng</label>
+          <label for="room-code-input">Mã phòng (để trống nếu tạo mới)</label>
           <input type="text" id="room-code-input" placeholder="Nhập mã phòng..." maxlength="4" autocomplete="off" style="text-transform:uppercase" />
         </div>
 
-        <button id="btn-join" class="btn btn-secondary">Tham gia</button>
+        <button id="btn-join" class="btn btn-primary" style="margin-top: 8px;">Vào phòng</button>
+        <div class="divider"><span>hoặc</span></div>
+        <button id="btn-create" class="btn btn-secondary">Tạo phòng mới</button>
       </div>
     </div>
   </div>
@@ -57,18 +55,18 @@
 
       <div id="lobby-mode-info" class="mode-info"></div>
 
-      <div id="lobby-players" class="lobby-players"></div>
-
-      <div id="lobby-teams" class="lobby-teams" style="display:none">
+      <div id="lobby-teams" class="lobby-teams">
         <div class="team-column">
-          <h3 class="team-header team-a-header">Đội A</h3>
+          <h3 class="team-header team-a-header">Đội Trắng</h3>
           <ul id="team-a-list" class="team-list"></ul>
         </div>
         <div class="team-column">
-          <h3 class="team-header team-b-header">Đội B</h3>
+          <h3 class="team-header team-b-header">Đội Đen</h3>
           <ul id="team-b-list" class="team-list"></ul>
         </div>
       </div>
+      
+      <button id="btn-switch-team" class="btn btn-secondary btn-small" style="margin-bottom: 16px;">Đổi phe</button>
 
       <button id="btn-start" class="btn btn-primary" style="display:none">Bắt đầu</button>
       <p id="lobby-waiting" class="waiting-text">Đang chờ chủ phòng bắt đầu...</p>

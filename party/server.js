@@ -64,6 +64,7 @@ export default class DecryptoServer {
 
     switch (data.type) {
       case 'join': this.handleJoin(sender, data); break;
+      case 'switch-team': this.handleSwitchTeam(sender); break;
       case 'start': this.handleStart(sender); break;
       case 'submit-clues': this.handleSubmitClues(sender, data); break;
       case 'submit-guess': this.handleSubmitGuess(sender, data); break;
@@ -103,12 +104,36 @@ export default class DecryptoServer {
     if (this.players.find(p => p.id === sender.id)) return;
 
     const name = (data.name || 'Người chơi').trim().slice(0, 20);
+    const countA = this.players.filter(p => p.team === 'A').length;
+    const countB = this.players.filter(p => p.team === 'B').length;
+    
     this.players.push({
       id: sender.id,
       name,
+      team: countA <= countB ? 'A' : 'B',
       isHost: this.players.length === 0,
     });
 
+    this.broadcastState();
+  }
+
+  handleSwitchTeam(sender) {
+    if (this.game) return;
+    const player = this.players.find(p => p.id === sender.id);
+    if (!player) return;
+
+    const total = this.players.length;
+    const maxPerTeam = Math.ceil(total / 2);
+    
+    const targetTeam = player.team === 'A' ? 'B' : 'A';
+    const targetCount = this.players.filter(p => p.team === targetTeam).length;
+    
+    if (targetCount >= maxPerTeam && total >= 3) {
+      this.sendError(sender, 'Đội này đã đầy! Phải duy trì sự cân bằng.');
+      return;
+    }
+    
+    player.team = targetTeam;
     this.broadcastState();
   }
 
@@ -136,7 +161,12 @@ export default class DecryptoServer {
   // ── Initialize 3-player game ─────────────────────────────
 
   initGame3P() {
-    const shuffled = shuffle(this.players.map(p => p.id));
+    const teamA = this.players.filter(p => p.team === 'A').map(p => p.id);
+    const teamB = this.players.filter(p => p.team === 'B').map(p => p.id);
+    
+    const encryptors = teamA.length >= 2 ? teamA : teamB;
+    const interceptor = teamA.length >= 2 ? teamB[0] : teamA[0];
+    
     const keywords = pickKeywords(4);
 
     this.game = {
@@ -145,8 +175,8 @@ export default class DecryptoServer {
       round: 1,
       maxRounds: 5,
 
-      encryptors: [shuffled[0], shuffled[1]],
-      interceptorId: shuffled[2],
+      encryptors: [encryptors[0], encryptors[1]],
+      interceptorId: interceptor,
       keywords,
       encryptorIndex: 0,
 
@@ -181,10 +211,8 @@ export default class DecryptoServer {
   // ── Initialize team game ─────────────────────────────────
 
   initGameTeam() {
-    const shuffled = shuffle(this.players.map(p => p.id));
-    const half = Math.ceil(shuffled.length / 2);
-    const teamAIds = shuffled.slice(0, half);
-    const teamBIds = shuffled.slice(half);
+    const teamAIds = this.players.filter(p => p.team === 'A').map(p => p.id);
+    const teamBIds = this.players.filter(p => p.team === 'B').map(p => p.id);
 
     const keywordsA = pickKeywords(4);
     const keywordsB = pickKeywords(4, keywordsA);
@@ -520,32 +548,34 @@ export default class DecryptoServer {
   }
 
   broadcastState() {
-    for (const conn of this.room.getConnections()) {
-      const state = this.getSanitizedState(conn.id);
-      conn.send(JSON.stringify({ type: 'state', state }));
-    }
+    this.players.forEach(p => {
+      const conn = this.room.getConnection(p.id);
+      if (conn) {
+        conn.send(JSON.stringify({
+          type: 'state',
+          state: this.getSanitizedState(p.id)
+        }));
+      }
+    });
   }
 
-  // ── State Sanitization ───────────────────────────────────
-
   getSanitizedState(viewerId) {
-    const g = this.game;
-
+    if (!this.game) {
+      return {
+        phase: 'LOBBY',
+        roomCode: this.room.id,
+        myId: viewerId,
+        players: this.players,
+      };
+    }
     const base = {
       roomCode: this.room.id,
-      players: this.players.map(p => ({ id: p.id, name: p.name, isHost: p.isHost })),
+      players: this.players.map(p => ({ id: p.id, name: p.name, isHost: p.isHost, team: p.team })),
       myId: viewerId,
     };
-
-    if (!g) {
-      return { ...base, phase: 'LOBBY' };
-    }
-
-    if (g.mode === '3p') {
-      return this.sanitize3P(viewerId, base);
-    } else {
-      return this.sanitizeTeam(viewerId, base);
-    }
+    return this.game.mode === '3p' 
+      ? this.sanitize3P(viewerId, base)
+      : this.sanitizeTeam(viewerId, base);
   }
 
   sanitize3P(viewerId, base) {

@@ -80,11 +80,17 @@ $('btn-join').addEventListener('click', () => {
 });
 
 $('player-name').addEventListener('keydown', e => {
-  if (e.key === 'Enter') $('btn-create').click();
+  if (e.key === 'Enter') {
+    if ($('room-code-input').value.trim()) $('btn-join').click();
+    else $('room-code-input').focus();
+  }
 });
 
 $('room-code-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') $('btn-join').click();
+  if (e.key === 'Enter') {
+    if ($('room-code-input').value.trim()) $('btn-join').click();
+    else $('btn-create').click();
+  }
 });
 
 function generateCode() {
@@ -98,10 +104,26 @@ function generateCode() {
 
 $('btn-copy-code').addEventListener('click', () => {
   const code = $('room-code-text').textContent;
-  navigator.clipboard.writeText(code).then(() => showToast('Đã sao chép'));
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(code).then(() => showToast('Đã sao chép'));
+  } else {
+    const textArea = document.createElement("textarea");
+    textArea.value = code;
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      showToast('Đã sao chép');
+    } catch (err) {
+      showToast('Sao chép thất bại');
+    }
+    document.body.removeChild(textArea);
+  }
 });
 
 $('btn-start').addEventListener('click', () => send({ type: 'start' }));
+
+$('btn-switch-team').addEventListener('click', () => send({ type: 'switch-team' }));
 
 // ── History Toggle ──────────────────────────────────────────
 
@@ -184,25 +206,11 @@ function renderLobby() {
     $('lobby-mode-info').textContent = `${count} người chơi — Chế độ đội`;
   }
 
-  // Team preview for 4+ players
-  if (count >= 4 && s.teamA && s.teamB) {
-    $('lobby-players').style.display = 'none';
-    $('lobby-teams').style.display = 'flex';
-    renderTeamList('team-a-list', s.teamA.players, s.myId);
-    renderTeamList('team-b-list', s.teamB.players, s.myId);
-  } else {
-    $('lobby-players').style.display = 'block';
-    $('lobby-teams').style.display = 'none';
-
-    $('lobby-players').innerHTML = s.players.map(p => `
-      <div class="lobby-player-item">
-        <div class="lobby-player-dot"></div>
-        <span class="lobby-player-name">${esc(p.name)}</span>
-        ${p.isHost ? '<span class="lobby-player-host">Chủ phòng</span>' : ''}
-        ${p.id === s.myId ? '<span class="lobby-player-you">Bạn</span>' : ''}
-      </div>
-    `).join('');
-  }
+  // Lobby Teams (pre-game)
+  const teamA = s.players.filter(p => p.team === 'A');
+  const teamB = s.players.filter(p => p.team === 'B');
+  renderTeamList('team-a-list', teamA, s.myId);
+  renderTeamList('team-b-list', teamB, s.myId);
 
   // Start button
   $('btn-start').style.display = isHost && count >= 3 ? 'block' : 'none';
@@ -211,7 +219,7 @@ function renderLobby() {
 
 function renderTeamList(ulId, players, myId) {
   $(ulId).innerHTML = players.map(p => `
-    <li>${esc(p.name)}${p.id === myId ? ' (bạn)' : ''}</li>
+    <li>${esc(p.name)}${p.id === myId ? ' (bạn)' : ''}${p.isHost ? ' <span class="lobby-player-host" style="font-size:10px; margin-left:4px;">Chủ phòng</span>' : ''}</li>
   `).join('');
 }
 
