@@ -575,14 +575,29 @@ function renderRevealPhase(area) {
 
   let html = '';
 
+  const currentClues = s.mode === '3p' ? s.clues : s.currentClues;
+
   // Correct code
   html += `
     <div class="reveal-section fade-in">
       <div class="reveal-title">Mã số đúng</div>
-      <div class="reveal-code-row">
-        ${s.revealCode.map(d => `<div class="code-digit" style="background:${KW_COLORS[d - 1]}">${d}</div>`).join('')}
+      <div class="reveal-code-row" style="flex-direction: column; gap: 8px;">
+        ${s.revealCode.map((d, i) => `
+          <div style="display: flex; align-items: center; gap: 12px; background: var(--surface-alt); padding: 8px 16px; border-radius: 8px; width: 100%; max-width: 300px; margin: 0 auto;">
+            <div class="code-digit" style="background:${KW_COLORS[d - 1]}">${d}</div>
+            <div style="color:${KW_COLORS[d - 1]}; font-weight: 600; font-size: 1.1rem">${esc(currentClues[i])}</div>
+          </div>
+        `).join('')}
       </div>
   `;
+
+  const renderGuessDigits = (guessArr) => {
+    return guessArr.map((g, i) => {
+      const isMatch = g === s.revealCode[i];
+      const color = isMatch ? 'var(--success)' : 'var(--error)';
+      return `<div class="code-digit" style="background:${color}; transform: scale(0.8)">${g}</div>`;
+    }).join('');
+  };
 
   // Decrypt result
   if (s.decryptGuess) {
@@ -591,7 +606,7 @@ function renderRevealPhase(area) {
     html += `
       <div class="reveal-result ${cls}">
         <span class="result-label">${label}</span>
-        <span class="result-codes">${s.decryptGuess.join(' - ')}</span>
+        <div style="display:flex; gap:4px; justify-content:center; margin-top:8px;">${renderGuessDigits(s.decryptGuess)}</div>
       </div>
     `;
   }
@@ -603,7 +618,7 @@ function renderRevealPhase(area) {
     html += `
       <div class="reveal-result ${cls}">
         <span class="result-label">${label}</span>
-        <span class="result-codes">${s.interceptGuess.join(' - ')}</span>
+        <div style="display:flex; gap:4px; justify-content:center; margin-top:8px;">${renderGuessDigits(s.interceptGuess)}</div>
       </div>
     `;
   } else if (s.round < 2 || (s.needIntercept === false)) {
@@ -726,7 +741,7 @@ function buildKeywordTable(kwClues, rounds) {
   html += `</tr></thead><tbody>`;
 
   for (let kw = 1; kw <= 4; kw++) {
-    html += `<tr><td style="color:${KW_COLORS[kw - 1]}; font-weight:600">#${kw}</td>`;
+    html += `<tr style="color:${KW_COLORS[kw - 1]}"><td style="font-weight:600">#${kw}</td>`;
     for (const r of uniqueRounds) {
       const entry = kwClues[kw].find(e => e.round === r);
       html += `<td class="kw-cell">${entry ? esc(entry.clue) : '—'}</td>`;
