@@ -748,9 +748,23 @@ body {
 .wire-col {
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  justify-content: space-around;
+  min-height: 220px;
   z-index: 2;
   flex: 1;
+}
+
+.kw-number {
+  font-size: 12px;
+  font-weight: 700;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: white;
+  flex-shrink: 0;
 }
 
 .wire-col.right-col {

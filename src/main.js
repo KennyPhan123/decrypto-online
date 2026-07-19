@@ -631,6 +631,11 @@ function attachGuessHandlers() {
     }
 
     // Draw connected lines
+    rightNodes.forEach(rn => {
+      rn.classList.remove('connected');
+      rn.style.backgroundColor = '';
+    });
+
     for (let i = 0; i < 3; i++) {
       const num = connections[i];
       const lNode = leftNodes[i];
@@ -657,6 +662,9 @@ function attachGuessHandlers() {
           
           lNode.classList.add('connected');
           lNode.style.color = rNode.style.color;
+
+          rNode.classList.add('connected');
+          rNode.style.backgroundColor = rNode.style.color;
         }
       } else {
         lNode.classList.remove('connected');
@@ -763,7 +771,9 @@ function renderRevealPhase(area) {
   const renderGuessComparison = (guessArr) => {
     return guessArr.map((g, i) => {
       const isMatch = g === s.revealCode[i];
-      const icon = isMatch ? '<span class="reveal-icon-correct">✅</span>' : '<span class="reveal-icon-wrong">❌</span>';
+      const icon = isMatch 
+        ? '<svg class="reveal-icon-correct" viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+        : '<svg class="reveal-icon-wrong" viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
       return `
         <div style="display:flex; align-items:center; gap:8px;">
           <div class="code-digit" style="background:${KW_COLORS[g - 1]}; transform: scale(0.8)">${g}</div>
