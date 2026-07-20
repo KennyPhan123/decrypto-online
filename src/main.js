@@ -178,9 +178,11 @@ function render() {
   }
 
   if (state.phase === 'LOBBY') {
+    window.currentActionState = null;
     renderLobby();
     showScreen('lobby-screen');
   } else if (state.phase === 'GAME_OVER') {
+    window.currentActionState = null;
     renderGameOver();
     showScreen('gameover-screen');
   } else {
@@ -381,11 +383,34 @@ function renderActionArea() {
   const s = state;
   const area = $('action-area');
 
+  let viewState = `${s.phase}_${s.round}_${s.currentTeamTurn}_${s.myRole}_${s.myTeam}`;
+  
+  if (s.phase === 'ENCRYPT') {
+    const hasSubmitted = s.mode === '3p' ? s.cluesSubmitted : (s.myTeam ? s['team' + s.myTeam].cluesSubmitted : false);
+    viewState += `_clues_${hasSubmitted}`;
+  } else if (s.phase.startsWith('GUESS')) {
+    let mySub = false;
+    if (s.myRole !== 'encryptor') {
+      if (s.mode === '3p') {
+        mySub = s.myRole === 'interceptor' ? s.interceptSubmitted : s.decryptSubmitted;
+      } else {
+        const isMyTeamTurn = s.myTeam === s.currentTeamTurn;
+        mySub = isMyTeamTurn ? s.decryptSubmitted : s.interceptSubmitted;
+      }
+    }
+    viewState += `_sub_${mySub}`;
+  }
+
+  if (window.currentActionState === viewState) {
+    return;
+  }
+  window.currentActionState = viewState;
+
   if (s.phase === 'ENCRYPT') {
     renderEncryptPhase(area);
-  } else if (s.phase === 'GUESS' || s.phase === 'GUESS_A' || s.phase === 'GUESS_B') {
+  } else if (s.phase.startsWith('GUESS')) {
     renderGuessPhase(area);
-  } else if (s.phase === 'REVEAL' || s.phase === 'REVEAL_A' || s.phase === 'REVEAL_B') {
+  } else if (s.phase.startsWith('REVEAL')) {
     renderRevealPhase(area);
   }
 }
