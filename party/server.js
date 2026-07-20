@@ -1,3 +1,4 @@
+import { Server, routePartykitRequest } from "partyserver";
 import { WORDS } from './words.js';
 
 // ── Utilities ──────────────────────────────────────────────
@@ -47,9 +48,9 @@ function arraysEqual(a, b) {
 
 // ── Server ─────────────────────────────────────────────────
 
-export default class DecryptoServer {
-  constructor(room) {
-    this.room = room;
+export class DecryptoServer extends Server {
+  constructor(ctx, env) {
+    super(ctx, env);
     this.players = [];
     this.game = null;
   }
@@ -58,9 +59,11 @@ export default class DecryptoServer {
     // Wait for 'join' message
   }
 
-  onMessage(message, sender) {
+  onMessage(connection, message) {
     let data;
     try { data = JSON.parse(message); } catch { return; }
+    
+    const sender = connection;
 
     switch (data.type) {
       case 'join': this.handleJoin(sender, data); break;
@@ -555,14 +558,14 @@ export default class DecryptoServer {
   }
 
   broadcastError(message) {
-    for (const conn of this.room.getConnections()) {
+    for (const conn of this.getConnections()) {
       conn.send(JSON.stringify({ type: 'error', message }));
     }
   }
 
   broadcastState() {
     this.players.forEach(p => {
-      const conn = this.room.getConnection(p.id);
+      const conn = this.getConnection(p.id);
       if (conn) {
         conn.send(JSON.stringify({
           type: 'state',
@@ -576,13 +579,13 @@ export default class DecryptoServer {
     if (!this.game) {
       return {
         phase: 'LOBBY',
-        roomCode: this.room.id,
+        roomCode: this.name,
         myId: viewerId,
         players: this.players,
       };
     }
     const base = {
-      roomCode: this.room.id,
+      roomCode: this.name,
       players: this.players.map(p => ({ id: p.id, name: p.name, isHost: p.isHost, team: p.team })),
       myId: viewerId,
     };
@@ -748,5 +751,14 @@ export default class DecryptoServer {
     }
 
     return state;
+  }
+}
+
+export default {
+  async fetch(request, env, ctx) {
+    return (
+      (await routePartykitRequest(request, env)) ||
+      new Response("Not Found", { status: 404 })
+    );
   }
 }

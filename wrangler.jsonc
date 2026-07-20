@@ -1,0 +1,22 @@
+{
+  "name": "decrypto-online",
+  "main": "party/server.js",
+  "compatibility_date": "2024-05-12",
+  "assets": {
+    "directory": "./dist"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DecryptoServer",
+        "class_name": "DecryptoServer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["DecryptoServer"]
+    }
+  ]
+}

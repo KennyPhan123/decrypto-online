@@ -26,13 +26,12 @@ function showToast(msg) {
 // ── Connection ──────────────────────────────────────────────
 
 function connect(roomCode, playerName) {
-  const host = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname.startsWith('192.168.') || location.hostname.startsWith('10.')
-    ? location.host
-    : `decrypto-online.kennyphan123.partykit.dev`;
+  const host = location.host;
 
   socket = new PartySocket({
     host: host,
-    room: roomCode
+    room: roomCode,
+    party: 'decrypto-server'
   });
 
   socket.addEventListener('open', () => {

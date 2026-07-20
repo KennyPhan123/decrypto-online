@@ -5,14 +5,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "serve": "npx partykit dev",
-    "deploy": "npx partykit deploy"
+    "preview": "vite preview",
+    "serve": "wrangler dev",
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "partysocket": "^1.0.2"
   },
   "devDependencies": {
-    "partykit": "^0.0.115",
-    "vite": "^5.4.11"
+    "partyserver": "^0.5.8",
+    "vite": "^5.4.11",
+    "wrangler": "^4.112.0"
   }
 }
