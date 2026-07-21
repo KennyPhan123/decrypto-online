@@ -71,6 +71,8 @@ export class DecryptoServer extends Server {
       case 'start': this.handleStart(sender); break;
       case 'submit-clues': this.handleSubmitClues(sender, data); break;
       case 'submit-guess': this.handleSubmitGuess(sender, data); break;
+      case 'chat-msg': this.handleChatMsg(sender, data); break;
+      case 'wire-sync': this.handleWireSync(sender, data); break;
       case 'continue': this.handleContinue(sender); break;
       case 'play-again': this.handlePlayAgain(sender); break;
       default: break;
@@ -201,6 +203,7 @@ export class DecryptoServer extends Server {
 
       usedCodes: [],
       history: [],
+      chat: [],
     };
 
     this.startRound3P();
@@ -216,6 +219,7 @@ export class DecryptoServer extends Server {
     g.decryptGuess = null;
     g.interceptGuess = null;
     g.timerEnd = null;
+    g.chat = [];
   }
 
   // ── Initialize team game ─────────────────────────────────
@@ -245,6 +249,7 @@ export class DecryptoServer extends Server {
           cluesSubmitted: false,
           decryptGuess: null,
           interceptGuess: null,
+          chat: [],
         },
         B: {
           playerIds: teamBIds,
@@ -257,6 +262,7 @@ export class DecryptoServer extends Server {
           cluesSubmitted: false,
           decryptGuess: null,
           interceptGuess: null,
+          chat: [],
         },
       },
 
@@ -282,6 +288,7 @@ export class DecryptoServer extends Server {
       team.cluesSubmitted = false;
       team.decryptGuess = null;
       team.interceptGuess = null;
+      team.chat = [];
     }
   }
 
@@ -396,6 +403,63 @@ export class DecryptoServer extends Server {
     }
 
     this.broadcastState();
+  }
+
+  // ── Chat & Wire Sync ─────────────────────────────────────
+
+  handleChatMsg(sender, data) {
+    const g = this.game;
+    if (!g) return;
+
+    const team = this.getPlayerTeam(sender.id);
+    if (!team && g.mode !== '3p') return;
+
+    const msg = {
+      senderId: sender.id,
+      senderName: this.players.find(p => p.id === sender.id)?.name || 'Unknown',
+      text: data.text,
+      time: Date.now()
+    };
+
+    if (g.mode === '3p') {
+      g.chat.push(msg);
+    } else {
+      g.teams[team].chat.push(msg);
+    }
+
+    this.broadcastState();
+  }
+
+  handleWireSync(sender, data) {
+    const g = this.game;
+    if (!g) return;
+
+    const team = this.getPlayerTeam(sender.id);
+    if (!team && g.mode !== '3p') return;
+
+    // Broadcast only to the same team members (excluding the sender)
+    const teamPlayerIds = g.mode === '3p' 
+      ? this.players.map(p => p.id)
+      : g.teams[team].playerIds;
+
+    const encryptorId = g.mode === '3p' 
+      ? g.encryptors[g.encryptorIndex]
+      : g.teams[team].playerIds[g.teams[team].encryptorIndex % g.teams[team].playerIds.length];
+
+    teamPlayerIds.forEach(id => {
+      if (id === sender.id) return; // Don't send back to sender
+      if (id === encryptorId) return; // Encryptor shouldn't see wire sync
+
+      const conn = this.getConnection(id);
+      if (conn) {
+        conn.send(JSON.stringify({
+          type: 'wire-sync-forward',
+          senderId: sender.id,
+          senderName: this.players.find(p => p.id === sender.id)?.name || 'Unknown',
+          syncData: data.syncData
+        }));
+      }
+    });
   }
 
   // ── Resolve rounds ───────────────────────────────────────
@@ -600,7 +664,6 @@ export class DecryptoServer extends Server {
     const isInterceptor = viewerId === g.interceptorId;
     const currentEncryptorId = g.encryptors[g.encryptorIndex];
     const isCurrentEncryptor = viewerId === currentEncryptorId;
-    const otherEncryptorId = g.encryptors.find(id => id !== currentEncryptorId);
 
     const state = {
       ...base,
@@ -621,6 +684,10 @@ export class DecryptoServer extends Server {
 
       history: g.history,
     };
+
+    if (!isCurrentEncryptor) {
+      state.chat = g.chat;
+    }
 
     // Code: only current encryptor sees during ENCRYPT
     if (g.phase === 'ENCRYPT' && isCurrentEncryptor) {

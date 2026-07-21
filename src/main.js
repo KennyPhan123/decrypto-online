@@ -7,6 +7,11 @@ let state = null;
 let timerInterval = null;
 
 const KW_COLORS = ['var(--kw-1)', 'var(--kw-2)', 'var(--kw-3)', 'var(--kw-4)'];
+const KW_BG = ['rgba(239, 68, 68, 0.2)', 'rgba(234, 179, 8, 0.2)', 'rgba(34, 197, 94, 0.2)', 'rgba(59, 130, 246, 0.2)'];
+
+// ── Ghost Wires State ──
+const ghostWires = {}; // { senderId: { senderName, data: { ... } } }
+let chatUnread = 0;
 
 // ── DOM Helpers ─────────────────────────────────────────────
 
@@ -41,10 +46,15 @@ function connect(roomCode, playerName) {
   socket.addEventListener('message', (event) => {
     const data = JSON.parse(event.data);
     if (data.type === 'state') {
+      const oldPhase = state?.phase;
       state = data.state;
+      if (oldPhase !== state.phase) clearGhostWires();
       render();
+      updateChatUI();
     } else if (data.type === 'error') {
       showToast(data.message);
+    } else if (data.type === 'wire-sync-forward') {
+      handleWireSync(data);
     }
   });
 
@@ -58,6 +68,100 @@ function send(data) {
     socket.send(JSON.stringify(data));
   }
 }
+
+// ── Chat & Sync Handlers ────────────────────────────────────
+
+function updateChatUI() {
+  const container = $('chat-container');
+  const panel = $('chat-panel');
+  const messagesEl = $('chat-messages');
+  const badge = $('chat-badge');
+
+  if (!state || !state.chat || state.myRole === 'encryptor') {
+    container.style.display = 'none';
+    return;
+  }
+  container.style.display = 'flex';
+
+  const newMsgCount = state.chat.length;
+  const currentCount = messagesEl.children.length;
+  
+  if (newMsgCount !== currentCount) {
+    messagesEl.innerHTML = state.chat.map(msg => {
+      const isSelf = msg.senderId === state.myId;
+      return `
+        <div class="chat-msg ${isSelf ? 'self' : 'other'}">
+          ${!isSelf ? `<div class="chat-sender">${esc(msg.senderName)}</div>` : ''}
+          ${esc(msg.text)}
+        </div>
+      `;
+    }).join('');
+    
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    if (panel.style.display === 'none' && newMsgCount > currentCount) {
+      chatUnread += (newMsgCount - currentCount);
+      badge.textContent = chatUnread > 9 ? '9+' : chatUnread;
+      badge.style.display = 'block';
+    }
+  }
+}
+
+$('chat-toggle').addEventListener('click', () => {
+  $('chat-panel').style.display = 'flex';
+  $('chat-toggle').style.display = 'none';
+  $('chat-badge').style.display = 'none';
+  chatUnread = 0;
+  $('chat-input').focus();
+});
+
+$('chat-close').addEventListener('click', () => {
+  $('chat-panel').style.display = 'none';
+  $('chat-toggle').style.display = 'flex';
+});
+
+$('chat-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const input = $('chat-input');
+  const text = input.value.trim();
+  if (text) {
+    send({ type: 'chat-msg', text });
+    input.value = '';
+  }
+});
+
+function handleWireSync(data) {
+  ghostWires[data.senderId] = {
+    senderName: data.senderName,
+    syncData: data.syncData,
+    lastUpdate: Date.now()
+  };
+  
+  // Only trigger redraw if we are on the guessing phase and the wire container exists
+  if ($('wire-svg')) {
+    // Need to redraw lines, but from attachGuessHandlers updateLines function
+    // For simplicity, we can dispatch a custom event
+    document.dispatchEvent(new CustomEvent('redraw-wires'));
+  }
+}
+
+function clearGhostWires() {
+  for (let id in ghostWires) delete ghostWires[id];
+}
+
+setInterval(() => {
+  const now = Date.now();
+  let changed = false;
+  for (let id in ghostWires) {
+    if (now - ghostWires[id].lastUpdate > 3000) {
+      delete ghostWires[id];
+      changed = true;
+    }
+  }
+  if (changed && $('wire-svg')) {
+    document.dispatchEvent(new CustomEvent('redraw-wires'));
+  }
+}, 1000);
 
 // ── Home Screen Sub-menus ───────────────────────────────────
 
@@ -649,6 +753,19 @@ function attachGuessHandlers() {
   let activeStartNode = null;
   let activeLine = null;
 
+  function broadcastWireSync() {
+    const cRect = container.getBoundingClientRect();
+    const syncData = {
+      connections,
+      activeLine: activeLine ? {
+        clueIdx: activeStartNode ? parseInt(activeStartNode.dataset.clue) : null,
+        x2: activeLine.x2 / cRect.width,
+        y2: activeLine.y2 / cRect.height
+      } : null
+    };
+    send({ type: 'wire-sync', syncData });
+  }
+
   function updateLines() {
     svg.innerHTML = '';
     const cRect = container.getBoundingClientRect();
@@ -715,8 +832,67 @@ function attachGuessHandlers() {
       }
     }
     
+    // Draw ghost wires
+    for (let id in ghostWires) {
+      const g = ghostWires[id];
+      const gConns = g.syncData.connections;
+      const gActive = g.syncData.activeLine;
+      
+      // Draw connected ghost lines
+      for (let i = 0; i < 3; i++) {
+        const num = gConns[i];
+        if (num) {
+          const lNode = leftNodes[i];
+          const rNode = Array.from(rightNodes).find(n => parseInt(n.dataset.val) === num);
+          if (lNode && rNode) {
+            const lRect = lNode.getBoundingClientRect();
+            const rRect = rNode.getBoundingClientRect();
+            
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', lRect.right - cRect.left);
+            line.setAttribute('y1', lRect.top + lRect.height/2 - cRect.top);
+            line.setAttribute('x2', rRect.left - cRect.left);
+            line.setAttribute('y2', rRect.top + rRect.height/2 - cRect.top);
+            line.setAttribute('stroke', rNode.style.color);
+            line.setAttribute('stroke-width', '4');
+            line.setAttribute('class', 'ghost-wire');
+            svg.appendChild(line);
+          }
+        }
+      }
+      
+      // Draw active ghost line
+      if (gActive && gActive.clueIdx !== null) {
+        const lNode = leftNodes[gActive.clueIdx];
+        if (lNode) {
+          const lRect = lNode.getBoundingClientRect();
+          const targetX = gActive.x2 * cRect.width;
+          const targetY = gActive.y2 * cRect.height;
+          
+          const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          line.setAttribute('x1', lRect.right - cRect.left);
+          line.setAttribute('y1', lRect.top + lRect.height/2 - cRect.top);
+          line.setAttribute('x2', targetX);
+          line.setAttribute('y2', targetY);
+          line.setAttribute('stroke', 'var(--text-muted)');
+          line.setAttribute('stroke-width', '3');
+          line.setAttribute('class', 'ghost-wire');
+          svg.appendChild(line);
+          
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', targetX);
+          text.setAttribute('y', targetY - 15);
+          text.setAttribute('class', 'ghost-label');
+          text.textContent = g.senderName;
+          svg.appendChild(text);
+        }
+      }
+    }
+    
     btn.disabled = !(connections[0] && connections[1] && connections[2]);
   }
+
+  document.addEventListener('redraw-wires', updateLines);
 
   container.addEventListener('pointerdown', e => {
     const node = e.target.closest('.left-node');
@@ -737,6 +913,7 @@ function attachGuessHandlers() {
     };
     
     updateLines();
+    broadcastWireSync();
     container.setPointerCapture(e.pointerId);
   });
 
@@ -746,6 +923,12 @@ function attachGuessHandlers() {
     activeLine.x2 = e.clientX - cRect.left;
     activeLine.y2 = e.clientY - cRect.top;
     updateLines();
+    
+    // Throttle broadcast on pointermove
+    if (!container.dataset.lastSync || Date.now() - parseInt(container.dataset.lastSync) > 50) {
+      broadcastWireSync();
+      container.dataset.lastSync = Date.now();
+    }
   });
 
   container.addEventListener('pointerup', e => {
@@ -770,6 +953,7 @@ function attachGuessHandlers() {
     activeStartNode = null;
     activeLine = null;
     updateLines();
+    broadcastWireSync();
   });
 
   rightNodes.forEach(rn => {
