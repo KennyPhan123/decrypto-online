@@ -471,15 +471,27 @@ function renderPhaseStatus() {
     const turn = s.currentTeamTurn;
     switch (s.phase) {
       case 'ENCRYPT':
-        text = s.myRole === 'encryptor'
-          ? 'Bạn là người mã hóa — Nhập gợi ý'
-          : 'Đang chờ mã hóa...';
+        if (s.myRole === 'encryptor') {
+          text = 'Bạn là người mã hóa — Hãy nhập 3 gợi ý!';
+        } else {
+          const encId = s.myTeam === 'A' ? s.teamA?.encryptorId : s.teamB?.encryptorId;
+          const encName = s.players?.find(p => p.id === encId)?.name || 'Đồng đội';
+          text = `Đang chờ ${encName} (đội bạn) và đối thủ nhập gợi ý...`;
+        }
         break;
       case 'GUESS_A': case 'GUESS_B':
-        text = `Đội ${turn} — Đoán mã số`;
+        if (s.myTeam === turn) {
+          if (s.myRole === 'encryptor') {
+            text = `Lượt Đội ${turn}: Đang chờ đồng đội và đối thủ nối dây...`;
+          } else {
+            text = `Lượt Đội ${turn}: Hãy giải mã (nối dây) gợi ý của đội mình!`;
+          }
+        } else {
+          text = `Lượt Đội ${turn}: Hãy cố gắng chặn mã (nối dây) gợi ý của đối thủ!`;
+        }
         break;
       case 'REVEAL_A': case 'REVEAL_B':
-        text = `Đội ${turn} — Kết quả`;
+        text = `Công bố kết quả vòng của Đội ${turn}!`;
         break;
     }
   }
