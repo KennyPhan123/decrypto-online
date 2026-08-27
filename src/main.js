@@ -543,7 +543,7 @@ function renderEncryptPhase(area) {
       <div class="clue-inputs fade-in">
         ${s.code.map((d, i) => `
           <div class="clue-input-row">
-            <input type="text" class="clue-input" id="clue-${i}" placeholder="Gợi ý cho từ khóa số ${d}..." autocomplete="off" style="border: 2px solid ${KW_COLORS[d - 1]}; padding: 14px;" />
+            <input type="text" class="clue-input" id="clue-${i}" placeholder="Gợi ý cho từ khóa số ${d}..." autocomplete="off" style="border: 4px solid ${KW_COLORS[d - 1]}; padding: 14px;" />
           </div>
         `).join('')}
       </div>
@@ -905,19 +905,28 @@ function attachGuessHandlers() {
     const readyArr = getReadyPlayers();
     const isReady = readyArr.includes(state.myId);
     const activeCount = state.activeGuessersCount || 1;
+    const hasSubmitted = guessType === 'decrypt' ? state.decryptSubmitted : state.interceptSubmitted;
     
     if (activeCount === 1) {
-      btn.textContent = 'Gửi';
-      btn.classList.add('btn-primary');
-      btn.classList.remove('btn-secondary');
-      container.style.opacity = '1';
-      container.style.pointerEvents = 'auto';
+      if (hasSubmitted) {
+        btn.textContent = 'Đã gửi (Chờ đối thủ...)';
+        btn.classList.add('btn-secondary');
+        btn.classList.remove('btn-primary');
+        container.style.opacity = '0.6';
+        container.style.pointerEvents = 'none';
+      } else {
+        btn.textContent = 'Gửi';
+        btn.classList.add('btn-primary');
+        btn.classList.remove('btn-secondary');
+        container.style.opacity = '1';
+        container.style.pointerEvents = 'auto';
+      }
     } else {
       btn.textContent = isReady 
         ? `Đã sẵn sàng (${readyArr.length}/${activeCount}) - Bấm để hủy` 
         : `Sẵn sàng (${readyArr.length}/${activeCount})`;
         
-      if (isReady) {
+      if (isReady || hasSubmitted) {
         btn.classList.add('btn-secondary');
         btn.classList.remove('btn-primary');
         container.style.opacity = '0.6';
@@ -931,7 +940,11 @@ function attachGuessHandlers() {
     }
 
     const allConnected = connections[0] && connections[1] && connections[2];
-    btn.disabled = !allConnected && !isReady;
+    if (activeCount === 1) {
+      btn.disabled = hasSubmitted || !allConnected;
+    } else {
+      btn.disabled = hasSubmitted || (!allConnected && !isReady);
+    }
   }
 
   // Remove old listeners to prevent duplicates if any
