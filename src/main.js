@@ -482,12 +482,16 @@ function renderPhaseStatus() {
       case 'GUESS_A': case 'GUESS_B':
         if (s.myTeam === turn) {
           if (s.myRole === 'encryptor') {
-            text = `Lượt Đội ${turn}: Đang chờ đồng đội và đối thủ nối dây...`;
+            text = s.round < 2 
+              ? `Lượt Đội ${turn}: Đang chờ đồng đội giải mã...`
+              : `Lượt Đội ${turn}: Đang chờ đồng đội và đối thủ nối dây...`;
           } else {
             text = `Lượt Đội ${turn}: Hãy giải mã (nối dây) gợi ý của đội mình!`;
           }
         } else {
-          text = `Lượt Đội ${turn}: Hãy cố gắng chặn mã (nối dây) gợi ý của đối thủ!`;
+          text = s.round < 2 
+            ? `Lượt Đội ${turn}: Hãy ghi chú gợi ý của đối thủ (Vòng 1 không được chặn mã)`
+            : `Lượt Đội ${turn}: Hãy cố gắng chặn mã (nối dây) gợi ý của đối thủ!`;
         }
         break;
       case 'REVEAL_A': case 'REVEAL_B':
