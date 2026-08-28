@@ -108,6 +108,11 @@ export class DecryptoServer extends Server {
       return;
     }
 
+    if (data.isCreating === false && this.players.length === 0) {
+      this.sendError(sender, 'Phòng này không tồn tại!');
+      return;
+    }
+
     if (this.players.find(p => p.id === sender.id)) return;
 
     const name = (data.name || 'Người chơi').trim().slice(0, 20);

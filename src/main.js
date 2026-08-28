@@ -30,7 +30,7 @@ function showToast(msg) {
 
 // ── Connection ──────────────────────────────────────────────
 
-function connect(roomCode, playerName) {
+function connect(roomCode, playerName, isCreating = false) {
   const host = location.host;
 
   socket = new PartySocket({
@@ -40,7 +40,7 @@ function connect(roomCode, playerName) {
   });
 
   socket.addEventListener('open', () => {
-    socket.send(JSON.stringify({ type: 'join', name: playerName }));
+    socket.send(JSON.stringify({ type: 'join', name: playerName, isCreating }));
   });
 
   socket.addEventListener('message', (event) => {
@@ -53,13 +53,21 @@ function connect(roomCode, playerName) {
       updateChatUI();
     } else if (data.type === 'error') {
       showToast(data.message);
+      if (data.message === 'Phòng này không tồn tại!' || data.message === 'Game đang diễn ra, không thể tham gia.') {
+        socket.intentionalClose = true;
+        socket.close();
+        showScreen('home-screen');
+        showHomeMenu('menu-main');
+      }
     } else if (data.type === 'wire-sync-forward') {
       handleWireSync(data);
     }
   });
 
   socket.addEventListener('close', () => {
-    showToast('Mất kết nối. Tải lại trang để chơi lại.');
+    if (!socket.intentionalClose) {
+      showToast('Mất kết nối. Tải lại trang để chơi lại.');
+    }
   });
 }
 
@@ -196,16 +204,16 @@ $('btn-create').addEventListener('click', () => {
   const name = $('create-name').value.trim();
   if (!name) { showToast('Vui lòng nhập tên'); return; }
   const code = generateCode();
-  connect(code, name);
+  connect(code, name, true);
   showScreen('lobby-screen');
 });
 
 $('btn-join').addEventListener('click', () => {
   const name = $('join-name').value.trim();
-  const code = $('join-code').value.trim().toUpperCase();
+  const code = $('join-code').value.trim();
   if (!name) { showToast('Vui lòng nhập tên'); return; }
-  if (!code || code.length < 4) { showToast('Vui lòng nhập mã phòng'); return; }
-  connect(code, name);
+  if (!code || code.length < 4) { showToast('Vui lòng nhập mã phòng hợp lệ'); return; }
+  connect(code, name, false);
   showScreen('lobby-screen');
 });
 
@@ -225,9 +233,9 @@ $('join-code').addEventListener('keydown', e => {
 });
 
 function generateCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const chars = '0123456789';
   let code = '';
-  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
   return code;
 }
 
