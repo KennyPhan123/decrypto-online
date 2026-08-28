@@ -56,8 +56,6 @@ function connect(roomCode, playerName, isCreating = false) {
       if (data.message === 'Phòng này không tồn tại!' || data.message === 'Game đang diễn ra, không thể tham gia.') {
         socket.intentionalClose = true;
         socket.close();
-        showScreen('home-screen');
-        showHomeMenu('menu-main');
       }
     } else if (data.type === 'wire-sync-forward') {
       handleWireSync(data);
@@ -205,7 +203,6 @@ $('btn-create').addEventListener('click', () => {
   if (!name) { showToast('Vui lòng nhập tên'); return; }
   const code = generateCode();
   connect(code, name, true);
-  showScreen('lobby-screen');
 });
 
 $('btn-join').addEventListener('click', () => {
@@ -214,7 +211,6 @@ $('btn-join').addEventListener('click', () => {
   if (!name) { showToast('Vui lòng nhập tên'); return; }
   if (!code || code.length < 4) { showToast('Vui lòng nhập mã phòng hợp lệ'); return; }
   connect(code, name, false);
-  showScreen('lobby-screen');
 });
 
 $('create-name').addEventListener('keydown', e => {
