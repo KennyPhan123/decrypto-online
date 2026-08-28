@@ -828,10 +828,10 @@ export class DecryptoServer extends Server {
 
     // Calculate active guessers count for 3P
     if (!isCurrentEncryptor) {
-      if (myRole === 'guesser') {
+      if (state.myRole === 'guesser') {
         const otherEncryptorId = g.encryptors.find(id => id !== currentEncryptorId);
         state.activeGuessersCount = (this.players.some(p => p.id === otherEncryptorId)) ? 1 : 1;
-      } else if (myRole === 'interceptor') {
+      } else if (state.myRole === 'interceptor') {
         state.activeGuessersCount = 1;
       }
     }
