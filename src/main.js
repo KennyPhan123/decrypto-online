@@ -212,6 +212,7 @@ $('btn-back-join').addEventListener('click', () => showHomeMenu('menu-main'));
 $('btn-create').addEventListener('click', () => {
   const name = $('create-name').value.trim();
   if (!name) { showToast('Vui lòng nhập tên'); return; }
+  localStorage.setItem('decrypto_player_name', name);
   const code = generateCode();
   connect(code, name, true);
 });
@@ -221,6 +222,7 @@ $('btn-join').addEventListener('click', () => {
   const code = $('join-code').value.trim();
   if (!name) { showToast('Vui lòng nhập tên'); return; }
   if (!code || code.length < 4) { showToast('Vui lòng nhập mã phòng hợp lệ'); return; }
+  localStorage.setItem('decrypto_player_name', name);
   connect(code, name, false);
 });
 
@@ -269,16 +271,7 @@ $('btn-copy-code').addEventListener('click', () => {
 
 $('btn-start').addEventListener('click', () => send({ type: 'start' }));
 
-$('btn-leave-room')?.addEventListener('click', () => {
-  send({ type: 'leave' });
-  const url = new URL(window.location);
-  url.searchParams.delete('room');
-  window.history.pushState({}, '', url);
-  showScreen('home-screen');
-  showHomeMenu('menu-main');
-  socket.close();
-  state = null;
-});
+
 
 $('team-a-col').addEventListener('click', () => send({ type: 'switch-team', target: 'A' }));
 $('team-b-col').addEventListener('click', () => send({ type: 'switch-team', target: 'B' }));
@@ -1450,9 +1443,9 @@ window.addEventListener('DOMContentLoaded', () => {
   const url = new URL(window.location);
   const room = url.searchParams.get('room');
   if (room) {
-    showHomeMenu('menu-join');
-    document.getElementById('join-code').value = room;
-    document.getElementById('join-name').focus();
+    $('home-screen').style.display = 'none';
+    const savedName = localStorage.getItem('decrypto_player_name') || 'Người chơi';
+    connect(room, savedName, false);
   }
 });
 
