@@ -1012,10 +1012,11 @@ function attachGuessHandlers() {
   container.addEventListener('sync-wires', updateLines);
 
   btn.addEventListener('click', () => {
-    if (activeCount === 1 && state[guessType === 'decrypt' ? 'decryptSubmitted' : 'interceptSubmitted']) {
+    const actCount = state.activeGuessersCount || 1;
+    if (actCount === 1 && state[guessType === 'decrypt' ? 'decryptSubmitted' : 'interceptSubmitted']) {
       send({ type: 'unsubmit-guess', guessType });
     } else {
-      const isReady = activeCount === 1 ? false : getReadyPlayers().includes(state.myId);
+      const isReady = actCount === 1 ? false : getReadyPlayers().includes(state.myId);
       send({ type: 'toggle-ready', guessType, isReady: !isReady });
     }
   });
