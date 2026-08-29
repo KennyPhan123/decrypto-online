@@ -423,17 +423,29 @@ export class DecryptoServer extends Server {
     if (!g) return;
 
     const guess = data.guess;
-    if (!Array.isArray(guess) || guess.length !== 3) return;
-    if (guess.some(n => typeof n !== 'number' || n < 1 || n > 4)) return;
+    if (!Array.isArray(guess) || guess.length !== 3) {
+      this.sendError(this.getConnection(this.playerToConnId.get(sender.id)), 'DEBUG: invalid guess array format');
+      return;
+    }
+    if (guess.some(n => typeof n !== 'number' || n < 1 || n > 4)) {
+      this.sendError(this.getConnection(this.playerToConnId.get(sender.id)), 'DEBUG: invalid guess values: ' + JSON.stringify(guess));
+      return;
+    }
 
     const guessType = data.guessType;
 
     if (g.mode === '3p') {
-      if (g.phase !== 'GUESS') return;
+      if (g.phase !== 'GUESS') {
+        this.sendError(this.getConnection(this.playerToConnId.get(sender.id)), 'DEBUG: phase !== GUESS. Phase: ' + g.phase);
+        return;
+      }
 
       if (guessType === 'decrypt') {
         const otherEncryptor = g.encryptors.find(id => id !== g.encryptors[g.encryptorIndex]);
-        if (sender.id !== otherEncryptor) return;
+        if (sender.id !== otherEncryptor) {
+          this.sendError(this.getConnection(this.playerToConnId.get(sender.id)), 'DEBUG: sender !== otherEncryptor. Sender: ' + sender.id + ', Other: ' + otherEncryptor);
+          return;
+        }
         g.decryptGuess = guess;
       } else if (guessType === 'intercept') {
         if (g.round < 2) return;
