@@ -22,7 +22,7 @@ let chatUnread = 0;
 // ── DOM Helpers ─────────────────────────────────────────────
 
 const $ = id => document.getElementById(id);
-const showScreen = id => {
+function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   $(id).classList.add('active');
 };
@@ -67,6 +67,8 @@ function connect(roomCode, playerName, isCreating = false) {
       if (data.message === 'Phòng này không tồn tại!' || data.message === 'Game đang diễn ra, không thể tham gia.') {
         socket.intentionalClose = true;
         socket.close();
+        showScreen('home-screen');
+        showHomeMenu('menu-main');
       }
     } else if (data.type === 'wire-sync-forward') {
       handleWireSync(data);
@@ -192,6 +194,12 @@ function showHomeMenu(menuId) {
   $('menu-create').style.display = 'none';
   $('menu-join').style.display = 'none';
   $(menuId).style.display = 'flex';
+
+  const url = new URL(window.location);
+  if (url.searchParams.has('room')) {
+    url.searchParams.delete('room');
+    window.history.pushState({}, '', url);
+  }
 }
 
 $('btn-menu-create').addEventListener('click', () => {
@@ -271,6 +279,20 @@ $('btn-copy-code').addEventListener('click', () => {
 
 $('btn-start').addEventListener('click', () => send({ type: 'start' }));
 
+$('btn-leave-room')?.addEventListener('click', () => {
+  if (socket) {
+    send({ type: 'leave' });
+    socket.intentionalClose = true;
+    socket.close();
+  }
+  const url = new URL(window.location);
+  url.searchParams.delete('room');
+  window.history.pushState({}, '', url);
+  state = null;
+  showScreen('home-screen');
+  showHomeMenu('menu-main');
+});
+
 
 
 $('team-a-col').addEventListener('click', () => send({ type: 'switch-team', target: 'A' }));
@@ -287,7 +309,10 @@ $('history-toggle').addEventListener('click', () => {
 $('btn-play-again').addEventListener('click', () => send({ type: 'play-again' }));
 
 $('btn-back-home').addEventListener('click', () => {
-  if (socket) socket.close();
+  if (socket) {
+    socket.intentionalClose = true;
+    socket.close();
+  }
   socket = null;
   state = null;
   showHomeMenu('menu-main');
