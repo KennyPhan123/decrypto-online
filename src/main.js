@@ -581,6 +581,7 @@ function renderEncryptPhase(area) {
   const hasSubmitted = s.mode === '3p' ? s.cluesSubmitted : (s.myTeam ? s['team' + s.myTeam].cluesSubmitted : false);
 
   if (s.myRole === 'encryptor' && s.code && !hasSubmitted) {
+    area.dataset.renderedPhase = '';
     area.innerHTML = `
       <div class="encrypt-code-display fade-in">
         <div class="encrypt-code-label">Mã số cần truyền đạt</div>
@@ -617,6 +618,7 @@ function renderEncryptPhase(area) {
           <p>Đang gửi gợi ý...<span class="waiting-dots"></span></p>
         </div>
       `;
+      area.dataset.renderedPhase = '';
     });
 
     // Auto-focus first input
