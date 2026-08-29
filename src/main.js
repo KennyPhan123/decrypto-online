@@ -332,14 +332,7 @@ function render() {
   if (state.phase !== 'LOBBY' && state.phase !== 'GAME_OVER' && offlinePlayers.length > 0) {
     overlay.style.display = 'flex';
     let text = `Đang chờ ${offlinePlayers.map(p => p.name).join(', ')} kết nối lại...`;
-    
-    const isHost = state.players.find(p => p.id === state.myId)?.isHost;
-    if (isHost) {
-       const kickHtml = offlinePlayers.map(p => `<button class="btn btn-secondary" style="margin: 5px;" onclick="window.kickPlayer('${p.id}')">Đuổi ${esc(p.name)}</button>`).join('');
-       $('disconnected-text').innerHTML = `${text}<br><br>${kickHtml}`;
-    } else {
-       $('disconnected-text').textContent = text;
-    }
+    $('disconnected-text').textContent = text;
   } else {
     overlay.style.display = 'none';
   }
@@ -405,11 +398,7 @@ function renderLobby() {
 
 function renderTeamList(ulId, players, myId, isHost) {
   $(ulId).innerHTML = players.map(p => {
-    let html = `<li><span style="opacity: ${p.isOnline ? 1 : 0.5}">${esc(p.name)}${p.id === myId ? ' (bạn)' : ''}${p.isHost ? ' <span class="lobby-player-host" style="font-size:10px; margin-left:4px;">Chủ phòng</span>' : ''}${!p.isOnline ? ' (Offline)' : ''}</span>`;
-    if (isHost && !p.isOnline && p.id !== myId) {
-      html += ` <button class="btn btn-secondary btn-small" onclick="window.kickPlayer('${p.id}')">Đuổi</button>`;
-    }
-    html += '</li>';
+    let html = `<li><span style="opacity: ${p.isOnline ? 1 : 0.5}">${esc(p.name)}${p.id === myId ? ' (bạn)' : ''}${p.isHost ? ' <span class="lobby-player-host" style="font-size:10px; margin-left:4px;">Chủ phòng</span>' : ''}${!p.isOnline ? ' (Offline)' : ''}</span></li>`;
     return html;
   }).join('');
 }
@@ -1026,7 +1015,7 @@ function attachGuessHandlers() {
     if (activeCount === 1 && state[guessType === 'decrypt' ? 'decryptSubmitted' : 'interceptSubmitted']) {
       send({ type: 'unsubmit-guess', guessType });
     } else {
-      const isReady = getReadyPlayers().includes(state.myId);
+      const isReady = activeCount === 1 ? false : getReadyPlayers().includes(state.myId);
       send({ type: 'toggle-ready', guessType, isReady: !isReady });
     }
   });
@@ -1467,9 +1456,5 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 
-window.kickPlayer = (id) => {
-  if (confirm('Bạn có chắc muốn đuổi người chơi này?')) {
-    send({ type: 'kick', targetId: id });
-  }
-};
+ 
 

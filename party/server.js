@@ -653,21 +653,13 @@ export class DecryptoServer extends Server {
       if (guessType === 'decrypt' && playerTeam === turnTeam) {
         targetReadyArray = g.teams[turnTeam].decryptReady;
         targetConnections = g.teams[turnTeam].decryptConnections;
-        targetTeamObj = g.teams[turnTeam];
+        const activeMembers = this.players.filter(p => p.team === turnTeam).length;
+        requiredCount = Math.max(1, activeMembers - 1);
       } else if (guessType === 'intercept' && playerTeam === opponentTeam) {
         targetReadyArray = g.teams[opponentTeam].interceptReady;
         targetConnections = g.teams[opponentTeam].interceptConnections;
-        targetTeamObj = g.teams[opponentTeam];
-      }
-      
-      if (targetTeamObj) {
-        const teamName = targetTeamObj === g.teams.A ? 'A' : 'B';
-        const activeMembers = this.players.filter(p => p.team === teamName).length;
-        if (teamName === turnTeam) {
-          requiredCount = Math.max(1, activeMembers - 1);
-        } else {
-          requiredCount = Math.max(1, activeMembers);
-        }
+        const activeMembers = this.players.filter(p => p.team === opponentTeam).length;
+        requiredCount = Math.max(1, activeMembers);
       }
     }
     
