@@ -719,9 +719,10 @@ function renderGuess3P(clues) {
   } else if (s.myRole === 'interceptor') {
     if (s.round < 2) {
       html += renderCluesOnly(clues);
-      html += `<div class="waiting-indicator">Vòng 1 — Chưa thể chặn mã</div>`;
       if (!s.decryptSubmitted) {
-        html += `<div class="waiting-indicator">Đang chờ đội mã hóa đoán<span class="waiting-dots"></span></div>`;
+        html += `<div class="waiting-indicator">Vòng 1 chưa thể chặn mã — Đang chờ đội mã hóa đoán<span class="waiting-dots"></span></div>`;
+      } else {
+        html += `<div class="waiting-indicator">Vòng 1 chưa thể chặn mã</div>`;
       }
     } else if (s.interceptSubmitted) {
       html += renderCluesOnly(clues);
@@ -1431,9 +1432,15 @@ function renderGameOver() {
   }
 
   $('btn-play-again').style.display = isHost ? 'block' : 'none';
+
+  const histContainer = $('gameover-history');
+  if (histContainer) {
+    if (s.mode === '3p') renderHistory3P(histContainer);
+    else renderHistoryTeam(histContainer);
+  }
 }
 
-// ── Escape HTML ─────────────────────────────────────────────
+// ── Event Listeners ─────────────────────────────────────────────
 
 function esc(str) {
   const div = document.createElement('div');
