@@ -71,6 +71,7 @@ export class DecryptoServer extends Server {
       case 'start': this.handleStart(sender); break;
       case 'submit-clues': this.handleSubmitClues(sender, data); break;
       case 'submit-guess': this.handleSubmitGuess(sender, data); break;
+      case 'unsubmit-guess': this.handleUnsubmitGuess(sender, data); break;
       case 'chat-msg': this.handleChatMsg(sender, data); break;
       case 'wire-sync': this.handleWireSync(sender, data); break;
       case 'update-connections': this.handleUpdateConnections(sender, data); break;
@@ -429,6 +430,43 @@ export class DecryptoServer extends Server {
       }
     }
 
+    this.broadcastState();
+  }
+
+  handleUnsubmitGuess(sender, data) {
+    const g = this.game;
+    if (!g) return;
+    
+    const guessType = data.guessType;
+    
+    if (g.mode === '3p') {
+      if (g.phase !== 'GUESS') return;
+      if (guessType === 'decrypt') {
+        const otherEncryptor = g.encryptors.find(id => id !== g.encryptors[g.encryptorIndex]);
+        if (sender.id !== otherEncryptor) return;
+        g.decryptGuess = null;
+        g.decryptReady = [];
+      } else if (guessType === 'intercept') {
+        if (sender.id !== g.interceptorId) return;
+        g.interceptGuess = null;
+        g.interceptReady = [];
+      }
+    } else {
+      const turnTeam = g.currentTeamTurn;
+      if (!turnTeam) return;
+      if (g.phase !== `GUESS_${turnTeam}`) return;
+      
+      const opponentTeam = turnTeam === 'A' ? 'B' : 'A';
+      const playerTeam = this.getPlayerTeam(sender.id);
+      
+      if (guessType === 'decrypt' && playerTeam === turnTeam) {
+        g.teams[turnTeam].decryptGuess = null;
+        g.teams[turnTeam].decryptReady = [];
+      } else if (guessType === 'intercept' && playerTeam === opponentTeam) {
+        g.teams[opponentTeam].interceptGuess = null;
+        g.teams[opponentTeam].interceptReady = [];
+      }
+    }
     this.broadcastState();
   }
 

@@ -929,10 +929,12 @@ function attachGuessHandlers() {
     
     if (activeCount === 1) {
       if (hasSubmitted) {
-        btn.textContent = 'Đã gửi (Chờ đối thủ...)';
+        btn.textContent = 'Đã gửi (Bấm để hủy)';
         btn.classList.add('btn-secondary');
         btn.classList.remove('btn-primary');
         container.style.opacity = '0.6';
+        // DO NOT use pointer-events: none on container if we need the button!
+        // Wait, container is wire-task, btn is outside it. So locking container is fine!
         container.style.pointerEvents = 'none';
       } else {
         btn.textContent = 'Gửi';
@@ -961,7 +963,7 @@ function attachGuessHandlers() {
 
     const allConnected = connections[0] && connections[1] && connections[2];
     if (activeCount === 1) {
-      btn.disabled = hasSubmitted || !allConnected;
+      btn.disabled = !hasSubmitted && !allConnected;
     } else {
       btn.disabled = hasSubmitted || (!allConnected && !isReady);
     }
@@ -975,8 +977,12 @@ function attachGuessHandlers() {
   container.addEventListener('sync-wires', updateLines);
 
   btn.addEventListener('click', () => {
-    const isReady = getReadyPlayers().includes(state.myId);
-    send({ type: 'toggle-ready', guessType, isReady: !isReady });
+    if (activeCount === 1 && state[guessType === 'decrypt' ? 'decryptSubmitted' : 'interceptSubmitted']) {
+      send({ type: 'unsubmit-guess', guessType });
+    } else {
+      const isReady = getReadyPlayers().includes(state.myId);
+      send({ type: 'toggle-ready', guessType, isReady: !isReady });
+    }
   });
 
   container.addEventListener('pointerdown', e => {
