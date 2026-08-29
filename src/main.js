@@ -2,6 +2,12 @@ import PartySocket from 'partysocket';
 
 // ── State ───────────────────────────────────────────────────
 
+let playerId = localStorage.getItem('decrypto_playerId');
+if (!playerId) {
+  playerId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  localStorage.setItem('decrypto_playerId', playerId);
+}
+
 let socket = null;
 let state = null;
 let timerInterval = null;
@@ -40,7 +46,12 @@ function connect(roomCode, playerName, isCreating = false) {
   });
 
   socket.addEventListener('open', () => {
-    socket.send(JSON.stringify({ type: 'join', name: playerName, isCreating }));
+    socket.send(JSON.stringify({ type: 'join', name: playerName, isCreating, playerId }));
+    
+    // Update URL
+    const url = new URL(window.location);
+    url.searchParams.set('room', roomCode);
+    window.history.pushState({}, '', url);
   });
 
   socket.addEventListener('message', (event) => {
@@ -258,6 +269,17 @@ $('btn-copy-code').addEventListener('click', () => {
 
 $('btn-start').addEventListener('click', () => send({ type: 'start' }));
 
+$('btn-leave-room')?.addEventListener('click', () => {
+  send({ type: 'leave' });
+  const url = new URL(window.location);
+  url.searchParams.delete('room');
+  window.history.pushState({}, '', url);
+  showScreen('home-screen');
+  showHomeMenu('menu-main');
+  socket.close();
+  state = null;
+});
+
 $('team-a-col').addEventListener('click', () => send({ type: 'switch-team', target: 'A' }));
 $('team-b-col').addEventListener('click', () => send({ type: 'switch-team', target: 'B' }));
 
@@ -301,6 +323,25 @@ function render() {
     renderGame();
     showScreen('game-screen');
     startTimer();
+  }
+
+  // Handle disconnected overlay (only during game)
+  const offlinePlayers = state.players.filter(p => !p.isOnline);
+  const overlay = $('disconnected-overlay');
+  
+  if (state.phase !== 'LOBBY' && state.phase !== 'GAME_OVER' && offlinePlayers.length > 0) {
+    overlay.style.display = 'flex';
+    let text = `Đang chờ ${offlinePlayers.map(p => p.name).join(', ')} kết nối lại...`;
+    
+    const isHost = state.players.find(p => p.id === state.myId)?.isHost;
+    if (isHost) {
+       const kickHtml = offlinePlayers.map(p => `<button class="btn btn-secondary" style="margin: 5px;" onclick="window.kickPlayer('${p.id}')">Đuổi ${esc(p.name)}</button>`).join('');
+       $('disconnected-text').innerHTML = `${text}<br><br>${kickHtml}`;
+    } else {
+       $('disconnected-text').textContent = text;
+    }
+  } else {
+    overlay.style.display = 'none';
   }
 }
 
@@ -354,18 +395,23 @@ function renderLobby() {
   // Lobby Teams (pre-game)
   const teamA = s.players.filter(p => p.team === 'A');
   const teamB = s.players.filter(p => p.team === 'B');
-  renderTeamList('team-a-list', teamA, s.myId);
-  renderTeamList('team-b-list', teamB, s.myId);
+  renderTeamList('team-a-list', teamA, s.myId, isHost);
+  renderTeamList('team-b-list', teamB, s.myId, isHost);
 
   // Start button
   $('btn-start').style.display = isHost && count >= 3 ? 'block' : 'none';
   $('lobby-waiting').style.display = isHost ? 'none' : 'block';
 }
 
-function renderTeamList(ulId, players, myId) {
-  $(ulId).innerHTML = players.map(p => `
-    <li>${esc(p.name)}${p.id === myId ? ' (bạn)' : ''}${p.isHost ? ' <span class="lobby-player-host" style="font-size:10px; margin-left:4px;">Chủ phòng</span>' : ''}</li>
-  `).join('');
+function renderTeamList(ulId, players, myId, isHost) {
+  $(ulId).innerHTML = players.map(p => {
+    let html = `<li><span style="opacity: ${p.isOnline ? 1 : 0.5}">${esc(p.name)}${p.id === myId ? ' (bạn)' : ''}${p.isHost ? ' <span class="lobby-player-host" style="font-size:10px; margin-left:4px;">Chủ phòng</span>' : ''}${!p.isOnline ? ' (Offline)' : ''}</span>`;
+    if (isHost && !p.isOnline && p.id !== myId) {
+      html += ` <button class="btn btn-secondary btn-small" onclick="window.kickPlayer('${p.id}')">Đuổi</button>`;
+    }
+    html += '</li>';
+    return html;
+  }).join('');
 }
 
 // ── Render Game ─────────────────────────────────────────────
@@ -1409,3 +1455,21 @@ function esc(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+window.addEventListener('DOMContentLoaded', () => {
+  const url = new URL(window.location);
+  const room = url.searchParams.get('room');
+  if (room) {
+    showHomeMenu('menu-join');
+    document.getElementById('join-code').value = room;
+    document.getElementById('join-name').focus();
+  }
+});
+
+
+window.kickPlayer = (id) => {
+  if (confirm('Bạn có chắc muốn đuổi người chơi này?')) {
+    send({ type: 'kick', targetId: id });
+  }
+};
+

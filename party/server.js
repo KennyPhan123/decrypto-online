@@ -52,6 +52,8 @@ export class DecryptoServer extends Server {
   constructor(ctx, env) {
     super(ctx, env);
     this.players = [];
+    this.connToPlayerId = new Map();
+    this.playerToConnId = new Map();
     this.game = null;
   }
 
@@ -63,7 +65,58 @@ export class DecryptoServer extends Server {
     let data;
     try { data = JSON.parse(message); } catch { return; }
     
-    const sender = connection;
+    let playerId = this.connToPlayerId.get(connection.id);
+
+    if (data.type === 'join') {
+      playerId = data.playerId;
+      if (!playerId) return;
+      this.connToPlayerId.set(connection.id, playerId);
+      this.playerToConnId.set(playerId, connection.id);
+      
+      const existingPlayer = this.players.find(p => p.id === playerId);
+      if (existingPlayer) {
+        existingPlayer.isOnline = true;
+        existingPlayer.name = (data.name || 'Người chơi').trim().slice(0, 20);
+        this.broadcastState();
+        return;
+      }
+    } else if (data.type === 'leave') {
+      const idx = this.players.findIndex(p => p.id === playerId);
+      if (idx !== -1) {
+        const wasHost = this.players[idx].isHost;
+        this.players.splice(idx, 1);
+        if (this.players.length > 0 && wasHost) this.players[0].isHost = true;
+      }
+      this.connToPlayerId.delete(connection.id);
+      this.playerToConnId.delete(playerId);
+      if (this.players.length === 0) this.game = null;
+      this.broadcastState();
+      return;
+    } else if (data.type === 'kick') {
+      const p = this.players.find(pl => pl.id === playerId);
+      if (!p || !p.isHost) return;
+      
+      const kickId = data.targetId;
+      const kickIdx = this.players.findIndex(pl => pl.id === kickId);
+      if (kickIdx !== -1) {
+        this.players.splice(kickIdx, 1);
+        const kickConnId = this.playerToConnId.get(kickId);
+        if (kickConnId) {
+          const c = this.getConnection(kickConnId);
+          if (c) this.sendError(c, 'Bạn đã bị kick khỏi phòng!');
+          this.connToPlayerId.delete(kickConnId);
+        }
+        this.playerToConnId.delete(kickId);
+        if (this.players.length === 0) this.game = null;
+        this.broadcastState();
+      }
+      return;
+    }
+
+    if (!playerId) return;
+
+    // Mock sender so we don't have to rewrite everything
+    const sender = { id: playerId };
 
     switch (data.type) {
       case 'join': this.handleJoin(sender, data); break;
@@ -83,20 +136,16 @@ export class DecryptoServer extends Server {
   }
 
   onClose(connection) {
-    const idx = this.players.findIndex(p => p.id === connection.id);
-    if (idx === -1) return;
+    const playerId = this.connToPlayerId.get(connection.id);
+    if (!playerId) return;
 
-    const wasHost = this.players[idx].isHost;
-    this.players.splice(idx, 1);
-
-    if (this.players.length > 0 && wasHost) {
-      this.players[0].isHost = true;
+    const player = this.players.find(p => p.id === playerId);
+    if (player) {
+      player.isOnline = false;
     }
 
-    if (this.players.length === 0) {
-      this.game = null;
-      return;
-    }
+    this.connToPlayerId.delete(connection.id);
+    // Let PartyKit naturally hibernate/destroy the room after a timeout of zero connections
 
     this.broadcastState();
   }
@@ -105,12 +154,14 @@ export class DecryptoServer extends Server {
 
   handleJoin(sender, data) {
     if (this.game && this.game.phase !== 'LOBBY') {
-      this.sendError(sender, 'Game đang diễn ra, không thể tham gia.');
+      const cId = this.playerToConnId.get(sender.id);
+      if (cId) this.sendError(this.getConnection(cId), 'Game đang diễn ra, không thể tham gia.');
       return;
     }
 
     if (data.isCreating === false && this.players.length === 0) {
-      this.sendError(sender, 'Phòng này không tồn tại!');
+      const cId = this.playerToConnId.get(sender.id);
+      if (cId) this.sendError(this.getConnection(cId), 'Phòng này không tồn tại!');
       return;
     }
 
@@ -125,6 +176,7 @@ export class DecryptoServer extends Server {
       name,
       team: countA <= countB ? 'A' : 'B',
       isHost: this.players.length === 0,
+      isOnline: true,
     });
 
     this.broadcastState();
@@ -805,8 +857,9 @@ export class DecryptoServer extends Server {
 
   broadcastState() {
     this.players.forEach(p => {
-      const conn = this.getConnection(p.id);
-      if (conn) {
+      const connId = this.playerToConnId.get(p.id);
+      const conn = connId ? this.getConnection(connId) : null;
+      if (conn && p.isOnline) {
         conn.send(JSON.stringify({
           type: 'state',
           state: this.getSanitizedState(p.id)
@@ -826,7 +879,7 @@ export class DecryptoServer extends Server {
     }
     const base = {
       roomCode: this.name,
-      players: this.players.map(p => ({ id: p.id, name: p.name, isHost: p.isHost, team: p.team })),
+      players: this.players.map(p => ({ id: p.id, name: p.name, isHost: p.isHost, team: p.team, isOnline: p.isOnline })),
       myId: viewerId,
     };
     return this.game.mode === '3p' 
@@ -980,7 +1033,7 @@ export class DecryptoServer extends Server {
       state.interceptReady = g.teams[myTeam].interceptReady;
       
       // Calculate active guessers count for this team
-      const onlineTeamMembers = this.players.filter(p => p.team === myTeam).length;
+      const onlineTeamMembers = this.players.filter(p => p.team === myTeam && p.isOnline).length;
       if (g.currentTeamTurn === myTeam || (!g.currentTeamTurn && myRole === 'encryptor')) {
         state.activeGuessersCount = Math.max(1, onlineTeamMembers - 1);
       } else {
