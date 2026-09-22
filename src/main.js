@@ -19,6 +19,19 @@ const KW_BG = ['rgba(239, 68, 68, 0.2)', 'rgba(234, 179, 8, 0.2)', 'rgba(34, 197
 const ghostWires = {}; // { senderId: { senderName, data: { ... } } }
 let chatUnread = 0;
 
+// ── State Helpers ───────────────────────────────────────────
+
+// Team mode: is my team the one decrypting right now?
+// Round 1 (GUESS_BOTH) both teams decrypt at once; afterwards only the turn team does.
+function isMyTeamDecrypting(s) {
+  return s.phase === 'GUESS_BOTH' || s.myTeam === s.currentTeamTurn;
+}
+
+function getMyGuessType(s) {
+  if (s.mode === '3p') return s.myRole === 'interceptor' ? 'intercept' : 'decrypt';
+  return isMyTeamDecrypting(s) ? 'decrypt' : 'intercept';
+}
+
 // ── DOM Helpers ─────────────────────────────────────────────
 
 const $ = id => document.getElementById(id);
@@ -551,8 +564,24 @@ function renderPhaseStatus() {
             : `Lượt Đội ${turn}: Hãy cố gắng chặn mã (nối dây) gợi ý của đối thủ!`;
         }
         break;
+      case 'GUESS_BOTH': {
+        // Round 1: both teams decrypt their own clues at the same time
+        const opp = s.myTeam === 'A' ? 'B' : 'A';
+        const lead = s.opponentDecryptSubmitted ? `Đội ${opp} đã xong` : 'Cả 2 đội cùng giải mã';
+        if (s.decryptSubmitted) {
+          text = `Đội bạn đã gửi dự đoán — Đang chờ Đội ${opp} giải mã...`;
+        } else if (s.myRole === 'encryptor') {
+          text = `${lead} — Đang chờ đồng đội giải mã...`;
+        } else {
+          text = `${lead} — Hãy nối dây gợi ý của đội mình!`;
+        }
+        break;
+      }
       case 'REVEAL_A': case 'REVEAL_B':
         text = `Công bố kết quả vòng của Đội ${turn}!`;
+        break;
+      case 'REVEAL_BOTH':
+        text = `Công bố kết quả vòng ${s.round} của cả 2 đội!`;
         break;
     }
   }
@@ -572,12 +601,7 @@ function renderActionArea() {
   } else if (s.phase.startsWith('GUESS')) {
     let mySub = false;
     if (s.myRole !== 'encryptor') {
-      if (s.mode === '3p') {
-        mySub = s.myRole === 'interceptor' ? s.interceptSubmitted : s.decryptSubmitted;
-      } else {
-        const isMyTeamTurn = s.myTeam === s.currentTeamTurn;
-        mySub = isMyTeamTurn ? s.decryptSubmitted : s.interceptSubmitted;
-      }
+      mySub = getMyGuessType(s) === 'decrypt' ? s.decryptSubmitted : s.interceptSubmitted;
     }
     viewState += `_sub_${mySub}`;
   }
@@ -698,7 +722,7 @@ function renderGuessPhase(area) {
   const clues = s.currentClues || s.clues;
   if (!clues) return;
 
-  const guessType = (s.myRole === 'interceptor' || (s.mode === 'team' && s.myTeam !== s.currentTeamTurn)) ? 'intercept' : 'decrypt';
+  const guessType = getMyGuessType(s);
   
   const phaseKey = s.phase + '_' + guessType;
   if (area.dataset.renderedPhase === phaseKey) {
@@ -769,13 +793,11 @@ function renderGuess3P(clues) {
 
 function renderGuessTeam(clues) {
   const s = state;
-  const turnTeam = s.currentTeamTurn;
-  const isMyTeamTurn = s.myTeam === turnTeam;
-  const oppTeam = turnTeam === 'A' ? 'B' : 'A';
+  const oppTeam = s.myTeam === 'A' ? 'B' : 'A';
   let html = '';
 
-  if (isMyTeamTurn) {
-    const teamData = turnTeam === 'A' ? s.teamA : s.teamB;
+  if (isMyTeamDecrypting(s)) {
+    const teamData = s.myTeam === 'A' ? s.teamA : s.teamB;
     const isEncryptor = teamData.encryptorId === s.myId;
 
     if (isEncryptor) {
@@ -1128,8 +1150,7 @@ function attachGuessHandlers() {
       if (s.mode === '3p') {
         hist = s.history || [];
       } else {
-        const isMyTeamTurn = s.myTeam === s.currentTeamTurn;
-        hist = isMyTeamTurn ? s.myHistory || [] : s.opponentHistory || [];
+        hist = isMyTeamDecrypting(s) ? s.myHistory || [] : s.opponentHistory || [];
       }
       
       const clueHistory = [];
@@ -1185,6 +1206,11 @@ function attachGuessHandlers() {
 
 function renderRevealPhase(area) {
   const s = state;
+  if (s.phase === 'REVEAL_BOTH') {
+    renderRevealBoth(area);
+    return;
+  }
+
   const isHost = s.players.find(p => p.id === s.myId)?.isHost;
 
   let html = '';
@@ -1250,6 +1276,64 @@ function renderRevealPhase(area) {
   html += `</div>`;
 
   // Continue button (host only)
+  if (isHost) {
+    html += `<button class="btn btn-primary" id="btn-continue">Tiếp tục</button>`;
+  } else {
+    html += `<div class="waiting-indicator">Đang chờ chủ phòng tiếp tục<span class="waiting-dots"></span></div>`;
+  }
+
+  area.innerHTML = html;
+
+  $('btn-continue')?.addEventListener('click', () => {
+    send({ type: 'continue' });
+  });
+}
+
+// Round 1: both teams decrypted at the same time, so both results are shown together.
+// One compact card per team: header = team + outcome, one row per clue = clue → correct digit.
+// A wrong position also shows the digit the team guessed (struck through) before the arrow.
+function renderRevealBoth(area) {
+  const s = state;
+  const isHost = s.players.find(p => p.id === s.myId)?.isHost;
+
+  const renderTeamCard = (teamKey) => {
+    const r = s.revealBoth[teamKey];
+    const isMine = teamKey === s.myTeam;
+    const outcomeCls = r.decryptCorrect ? 'ok' : 'fail';
+    const outcomeText = r.decryptCorrect ? 'Giải mã thành công' : 'Giải mã thất bại';
+    const guess = r.decryptGuess || [];
+
+    const rows = r.code.map((d, i) => {
+      const g = guess[i];
+      const wrong = g && g !== d;
+      return `
+        <div class="reveal-both-row${wrong ? ' wrong' : ''}">
+          <span class="reveal-both-clue">${esc(r.clues[i])}</span>
+          <span class="reveal-both-answer">
+            ${wrong ? `<span class="reveal-both-wrong" style="background:${KW_COLORS[g - 1]}">${g}</span>` : ''}
+            <span class="reveal-guess-arrow">→</span>
+            <span class="code-digit reveal-both-digit" style="background:${KW_COLORS[d - 1]}">${d}</span>
+          </span>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="reveal-both-card">
+        <div class="reveal-both-header team-${teamKey.toLowerCase()}-header">
+          <span>Đội ${teamKey} <span class="reveal-both-sub">${isMine ? '(đội bạn)' : '(đối phương)'}</span></span>
+          <span class="reveal-both-outcome ${outcomeCls}">${outcomeText}</span>
+        </div>
+        ${rows}
+      </div>
+    `;
+  };
+
+  // Own team first, opponent second
+  const order = s.myTeam === 'B' ? ['B', 'A'] : ['A', 'B'];
+
+  let html = `<div class="reveal-both fade-in">${order.map(renderTeamCard).join('')}</div>`;
+
   if (isHost) {
     html += `<button class="btn btn-primary" id="btn-continue">Tiếp tục</button>`;
   } else {
