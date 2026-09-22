@@ -795,6 +795,7 @@ body {
   display: flex;
   align-items: center;
   gap: 14px;
+  min-height: 44px;
 }
 
 .wire-col.right-col .wire-item {
@@ -813,7 +814,10 @@ body {
   align-items: center;
   gap: 8px;
   box-shadow: var(--shadow-sm);
-  max-width: 140px;
+  width: 140px;
+  min-height: 44px;
+  box-sizing: border-box;
+  flex-shrink: 0;
   transition: all 0.2s;
 }
 
@@ -1260,6 +1264,15 @@ body {
   .token-group {
     padding: 3px 6px;
     gap: 6px;
+  }
+
+  /* Keep wire targets tappable without making the board overflow on phones. */
+  .wire-box {
+    width: 120px;
+  }
+
+  .wire-col.right-col .wire-box {
+    width: 88px;
   }
 }
 

@@ -705,19 +705,12 @@ function renderEncryptPhase(area) {
       </div>
       <button class="btn btn-primary" id="btn-submit-clues">Gửi gợi ý</button>
     `;
-    $('btn-submit-clues').addEventListener('click', (e) => {
-      const isAuto = !e.isTrusted;
-      let clues = [0, 1, 2].map(i => $(`clue-${i}`).value.trim());
+    $('btn-submit-clues').addEventListener('click', () => {
+      const clues = [0, 1, 2].map(i => $(`clue-${i}`).value.trim());
 
-      if (!isAuto && clues.some(c => !c)) {
-        showToast('Vui lòng nhập đủ 3 gợi ý');
-        return;
-      }
-
-      if (isAuto) {
-        clues = clues.map(c => c || '(Hết giờ)');
-      }
-
+      // An empty clue is valid: it means the encryptor did not provide one.
+      // Keep it empty instead of turning it into a timeout message so the
+      // other team sees exactly what was submitted.
       send({ type: 'submit-clues', clues });
 
       area.innerHTML = `
@@ -1123,7 +1116,10 @@ function attachGuessHandlers() {
   });
 
   container.addEventListener('pointerdown', e => {
-    const node = e.target.closest('.left-node');
+    // Treat the whole left row as the pointer target. This keeps the wire
+    // hitbox forgiving even when the visible clue box is narrow or empty.
+    const node = e.target.closest('.left-node')
+      || e.target.closest('.wire-item')?.querySelector('.left-node');
     if (!node) return;
     
     const clueIdx = parseInt(node.dataset.clue);
