@@ -2,10 +2,18 @@ import PartySocket from 'partysocket';
 
 // ── State ───────────────────────────────────────────────────
 
-let playerId = localStorage.getItem('decrypto_playerId');
+// Test helper: "?as=N" in the URL gives this tab its own localStorage slot
+// (e.g. decrypto_playerId_2 / decrypto_player_name_2), so several tabs in one
+// browser can play as different people. Without it, keys stay exactly as before.
+const asParam = new URL(window.location).searchParams.get('as');
+const storageSuffix = asParam ? `_${asParam}` : '';
+const PLAYER_ID_KEY = `decrypto_playerId${storageSuffix}`;
+const PLAYER_NAME_KEY = `decrypto_player_name${storageSuffix}`;
+
+let playerId = localStorage.getItem(PLAYER_ID_KEY);
 if (!playerId) {
   playerId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-  localStorage.setItem('decrypto_playerId', playerId);
+  localStorage.setItem(PLAYER_ID_KEY, playerId);
 }
 
 let socket = null;
@@ -233,7 +241,7 @@ $('btn-back-join').addEventListener('click', () => showHomeMenu('menu-main'));
 $('btn-create').addEventListener('click', () => {
   const name = $('create-name').value.trim();
   if (!name) { showToast('Vui lòng nhập tên'); return; }
-  localStorage.setItem('decrypto_player_name', name);
+  localStorage.setItem(PLAYER_NAME_KEY, name);
   const code = generateCode();
   connect(code, name, true);
 });
@@ -243,7 +251,7 @@ $('btn-join').addEventListener('click', () => {
   const code = $('join-code').value.trim();
   if (!name) { showToast('Vui lòng nhập tên'); return; }
   if (!code || code.length < 4) { showToast('Vui lòng nhập mã phòng hợp lệ'); return; }
-  localStorage.setItem('decrypto_player_name', name);
+  localStorage.setItem(PLAYER_NAME_KEY, name);
   connect(code, name, false);
 });
 
@@ -265,7 +273,7 @@ $('join-code').addEventListener('keydown', e => {
 function generateCode() {
   const chars = '0123456789';
   let code = '';
-  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
   return code;
 }
 
@@ -1204,6 +1212,23 @@ function attachGuessHandlers() {
 
 // ── Reveal Phase ────────────────────────────────────────────
 
+// One comparison row shared by every reveal screen: clue on the left, the arrow
+// centered in the row (via justify-content: space-between), the correct digit on
+// the right. A wrong guess shows the guessed digit (struck through) before the arrow.
+function buildRevealRow(clue, correctDigit, guessedDigit) {
+  const wrong = guessedDigit && guessedDigit !== correctDigit;
+  return `
+    <div class="reveal-both-row${wrong ? ' wrong' : ''}">
+      <span class="reveal-both-clue">${esc(clue)}</span>
+      <span class="reveal-both-mid">
+        ${wrong ? `<span class="reveal-both-wrong" style="background:${KW_COLORS[guessedDigit - 1]}">${guessedDigit}</span>` : ''}
+        <span class="reveal-guess-arrow">→</span>
+      </span>
+      <span class="code-digit reveal-both-digit" style="background:${KW_COLORS[correctDigit - 1]}">${correctDigit}</span>
+    </div>
+  `;
+}
+
 function renderRevealPhase(area) {
   const s = state;
   if (s.phase === 'REVEAL_BOTH') {
@@ -1232,48 +1257,83 @@ function renderRevealPhase(area) {
       </div>
   `;
 
-  const renderGuessComparison = (guessArr) => {
-    return guessArr.map((g, i) => {
-      const isMatch = g === s.revealCode[i];
-      const icon = isMatch 
-        ? '<svg class="reveal-icon-correct" viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>'
-        : '<svg class="reveal-icon-wrong" viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
-      return `
-        <div style="display:flex; align-items:center; gap:8px;">
-          <div class="code-digit" style="background:${KW_COLORS[g - 1]}; transform: scale(0.8)">${g}</div>
-          ${icon}
+  if (s.mode === '3p') {
+    const renderGuessComparison = (guessArr) => {
+      return guessArr.map((g, i) => {
+        const isMatch = g === s.revealCode[i];
+        const icon = isMatch
+          ? '<svg class="reveal-icon-correct" viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+          : '<svg class="reveal-icon-wrong" viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+        return `
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div class="code-digit" style="background:${KW_COLORS[g - 1]}; transform: scale(0.8)">${g}</div>
+            ${icon}
+          </div>
+        `;
+      }).join('');
+    };
+
+    // Decrypt result
+    if (s.decryptGuess) {
+      const cls = s.decryptCorrect ? 'result-correct' : 'result-incorrect';
+      const label = s.decryptCorrect ? 'Giải mã thành công' : 'Giải mã thất bại';
+      html += `
+        <div class="reveal-result ${cls}">
+          <span class="result-label">${label}</span>
+          <div style="display:flex; gap:12px;">${renderGuessComparison(s.decryptGuess)}</div>
         </div>
       `;
-    }).join('');
-  };
+    }
 
-  // Decrypt result
-  if (s.decryptGuess) {
-    const cls = s.decryptCorrect ? 'result-correct' : 'result-incorrect';
-    const label = s.decryptCorrect ? 'Giải mã thành công' : 'Giải mã thất bại';
+    // Intercept result
+    if (s.interceptGuess) {
+      const cls = s.interceptCorrect ? 'result-correct' : 'result-incorrect';
+      const label = s.interceptCorrect ? 'Chặn mã thành công!' : 'Chặn mã thất bại';
+      html += `
+        <div class="reveal-result ${cls}">
+          <span class="result-label">${label}</span>
+          <div style="display:flex; gap:12px;">${renderGuessComparison(s.interceptGuess)}</div>
+        </div>
+      `;
+    } else if (s.round < 2 || (s.needIntercept === false)) {
+      // No interception in round 1
+    }
+
+    html += `</div>`;
+  } else {
+    html += `</div>`;
+
+    // Team mode: spell out which team did what, using the same card style as
+    // round 1's REVEAL_BOTH — card 1: the turn team decrypts, card 2: the other
+    // team attempts an intercept.
+    const turn = s.currentTeamTurn;
+    const interceptTeam = turn === 'A' ? 'B' : 'A';
+
+    const buildTeamCard = ({ teamKey, action, correct, guess }) => {
+      const isMine = teamKey === s.myTeam;
+      const outcomeCls = correct ? 'ok' : 'fail';
+      const outcomeText = `${action} ${correct ? 'thành công' : 'thất bại'}`;
+      const body = guess
+        ? s.revealCode.map((d, i) => buildRevealRow(s.currentClues[i], d, guess[i])).join('')
+        : `<div class="reveal-both-none">Đội ${teamKey} không đưa ra dự đoán</div>`;
+      return `
+        <div class="reveal-both-card">
+          <div class="reveal-both-header team-${teamKey.toLowerCase()}-header">
+            <span>Đội ${teamKey} <span class="reveal-both-sub">— ${action} (${isMine ? 'đội bạn' : 'đối phương'})</span></span>
+            <span class="reveal-both-outcome ${outcomeCls}">${outcomeText}</span>
+          </div>
+          ${body}
+        </div>
+      `;
+    };
+
     html += `
-      <div class="reveal-result ${cls}">
-        <span class="result-label">${label}</span>
-        <div style="display:flex; gap:12px;">${renderGuessComparison(s.decryptGuess)}</div>
+      <div class="reveal-both fade-in">
+        ${buildTeamCard({ teamKey: turn, action: 'Giải mã', correct: s.decryptCorrect, guess: s.decryptGuess })}
+        ${buildTeamCard({ teamKey: interceptTeam, action: 'Chặn mã', correct: s.interceptCorrect, guess: s.interceptGuess })}
       </div>
     `;
   }
-
-  // Intercept result
-  if (s.interceptGuess) {
-    const cls = s.interceptCorrect ? 'result-correct' : 'result-incorrect';
-    const label = s.interceptCorrect ? 'Chặn mã thành công!' : 'Chặn mã thất bại';
-    html += `
-      <div class="reveal-result ${cls}">
-        <span class="result-label">${label}</span>
-        <div style="display:flex; gap:12px;">${renderGuessComparison(s.interceptGuess)}</div>
-      </div>
-    `;
-  } else if (s.round < 2 || (s.needIntercept === false)) {
-    // No interception in round 1
-  }
-
-  html += `</div>`;
 
   // Continue button (host only)
   if (isHost) {
@@ -1303,20 +1363,7 @@ function renderRevealBoth(area) {
     const outcomeText = r.decryptCorrect ? 'Giải mã thành công' : 'Giải mã thất bại';
     const guess = r.decryptGuess || [];
 
-    const rows = r.code.map((d, i) => {
-      const g = guess[i];
-      const wrong = g && g !== d;
-      return `
-        <div class="reveal-both-row${wrong ? ' wrong' : ''}">
-          <span class="reveal-both-clue">${esc(r.clues[i])}</span>
-          <span class="reveal-both-answer">
-            ${wrong ? `<span class="reveal-both-wrong" style="background:${KW_COLORS[g - 1]}">${g}</span>` : ''}
-            <span class="reveal-guess-arrow">→</span>
-            <span class="code-digit reveal-both-digit" style="background:${KW_COLORS[d - 1]}">${d}</span>
-          </span>
-        </div>
-      `;
-    }).join('');
+    const rows = r.code.map((d, i) => buildRevealRow(r.clues[i], d, guess[i])).join('');
 
     return `
       <div class="reveal-both-card">
@@ -1562,7 +1609,8 @@ window.addEventListener('DOMContentLoaded', () => {
   const room = url.searchParams.get('room');
   if (room) {
     $('home-screen').style.display = 'none';
-    const savedName = localStorage.getItem('decrypto_player_name') || 'Người chơi';
+    const savedName = localStorage.getItem(PLAYER_NAME_KEY)
+      || (asParam ? `Người chơi ${asParam}` : 'Người chơi');
     connect(room, savedName, false);
   }
 });
