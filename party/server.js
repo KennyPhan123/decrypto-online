@@ -634,8 +634,10 @@ export class DecryptoServer extends Server {
       }
 
       if (shouldSend) {
-        const conn = this.getConnection(p.id);
-        if (conn) {
+        // getConnection() wants the socket's connection id, not our playerId
+        const connId = this.playerToConnId.get(p.id);
+        const conn = connId ? this.getConnection(connId) : null;
+        if (conn && p.isOnline) {
           conn.send(JSON.stringify({
             type: 'wire-sync-forward',
             senderId: sender.id,
