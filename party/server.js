@@ -380,7 +380,9 @@ export class DecryptoServer extends Server {
 
     const clues = data.clues;
     if (!Array.isArray(clues) || clues.length !== 3) return;
-    if (clues.some(c => typeof c !== 'string' || c.trim().length === 0)) return;
+    // Empty clues are intentional (the player may submit before filling every
+    // field), so preserve them as empty strings instead of rejecting them.
+    if (clues.some(c => typeof c !== 'string')) return;
 
     const trimmed = clues.map(c => c.trim());
 
