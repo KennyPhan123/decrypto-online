@@ -403,8 +403,15 @@ export class DecryptoServer extends Server {
       t.cluesSubmitted = true;
 
       if (g.teams.A.cluesSubmitted && g.teams.B.cluesSubmitted) {
-        g.phase = 'GUESS_A';
-        g.currentTeamTurn = 'A';
+        if (g.round < 2) {
+          // Round 1 has no interception, so the two decrypts are independent:
+          // let both teams decrypt their own clues at the same time.
+          g.phase = 'GUESS_BOTH';
+          g.currentTeamTurn = null;
+        } else {
+          g.phase = 'GUESS_A';
+          g.currentTeamTurn = 'A';
+        }
         g.timerEnd = null;
       } else {
         if (!g.timerEnd) {
@@ -462,39 +469,79 @@ export class DecryptoServer extends Server {
         this.resolveRound3P();
       }
     } else {
-      const turnTeam = g.currentTeamTurn;
-      if (!turnTeam) return;
-      if (g.phase !== `GUESS_${turnTeam}`) return;
-
-      const opponentTeam = turnTeam === 'A' ? 'B' : 'A';
-      const ownTeam = g.teams[turnTeam];
-      const oppTeam = g.teams[opponentTeam];
-      const playerTeam = this.getPlayerTeam(sender.id);
+      const target = this.resolveGuessTarget(sender.id, guessType);
+      if (!target) return;
+      const board = g.teams[target.teamKey];
 
       if (guessType === 'decrypt') {
-        if (playerTeam !== turnTeam) return;
-        const encId = ownTeam.playerIds[ownTeam.encryptorIndex % ownTeam.playerIds.length];
-        if (sender.id === encId) return;
-        if (ownTeam.decryptGuess) return;
-        ownTeam.decryptGuess = guess;
+        if (board.decryptGuess) return;
+        board.decryptGuess = guess;
       } else if (guessType === 'intercept') {
         if (g.round < 2) return;
-        if (playerTeam !== opponentTeam) return;
-        if (oppTeam.interceptGuess) return;
-        oppTeam.interceptGuess = guess;
+        if (board.interceptGuess) return;
+        board.interceptGuess = guess;
       }
 
-      const decryptDone = ownTeam.decryptGuess !== null;
-      const needIntercept = g.round >= 2;
-      const interceptDone = !needIntercept || oppTeam.interceptGuess !== null;
+      if (g.phase === 'GUESS_BOTH') {
+        // Round 1: reveal only once both teams have decrypted.
+        if (g.teams.A.decryptGuess !== null && g.teams.B.decryptGuess !== null) {
+          g.phase = 'REVEAL_BOTH';
+          this.resolveTeamTurn('A');
+          this.resolveTeamTurn('B');
+        }
+      } else {
+        const turnTeam = g.currentTeamTurn;
+        const ownTeam = g.teams[turnTeam];
+        const oppTeam = g.teams[turnTeam === 'A' ? 'B' : 'A'];
 
-      if (decryptDone && interceptDone) {
-        g.phase = `REVEAL_${turnTeam}`;
-        this.resolveTeamTurn(turnTeam);
+        const decryptDone = ownTeam.decryptGuess !== null;
+        const needIntercept = g.round >= 2;
+        const interceptDone = !needIntercept || oppTeam.interceptGuess !== null;
+
+        if (decryptDone && interceptDone) {
+          g.phase = `REVEAL_${turnTeam}`;
+          this.resolveTeamTurn(turnTeam);
+        }
       }
     }
 
     this.broadcastState();
+  }
+
+  /**
+   * Team mode: figure out which team's board (decrypt or intercept) the sender
+   * is allowed to act on right now. Returns { teamKey } or null.
+   *
+   * - GUESS_BOTH (round 1): every team decrypts its own clues, nobody intercepts.
+   * - GUESS_A / GUESS_B: the turn team decrypts, the other team intercepts.
+   */
+  resolveGuessTarget(senderId, guessType) {
+    const g = this.game;
+    if (!g || g.mode !== 'team') return null;
+    if (guessType !== 'decrypt' && guessType !== 'intercept') return null;
+
+    const playerTeam = this.getPlayerTeam(senderId);
+    if (!playerTeam) return null;
+
+    // The encryptor never takes part in decrypting their own clues.
+    if (guessType === 'decrypt') {
+      const own = g.teams[playerTeam];
+      const encId = own.playerIds[own.encryptorIndex % own.playerIds.length];
+      if (senderId === encId) return null;
+    }
+
+    if (g.phase === 'GUESS_BOTH') {
+      return guessType === 'decrypt' ? { teamKey: playerTeam } : null;
+    }
+
+    const turnTeam = g.currentTeamTurn;
+    if (!turnTeam || g.phase !== `GUESS_${turnTeam}`) return null;
+    const opponentTeam = turnTeam === 'A' ? 'B' : 'A';
+
+    if (guessType === 'decrypt') {
+      return playerTeam === turnTeam ? { teamKey: turnTeam } : null;
+    }
+    return playerTeam === opponentTeam ? { teamKey: opponentTeam } : null;
   }
 
   handleUnsubmitGuess(sender, data) {
@@ -516,19 +563,16 @@ export class DecryptoServer extends Server {
         g.interceptReady = [];
       }
     } else {
-      const turnTeam = g.currentTeamTurn;
-      if (!turnTeam) return;
-      if (g.phase !== `GUESS_${turnTeam}`) return;
-      
-      const opponentTeam = turnTeam === 'A' ? 'B' : 'A';
-      const playerTeam = this.getPlayerTeam(sender.id);
-      
-      if (guessType === 'decrypt' && playerTeam === turnTeam) {
-        g.teams[turnTeam].decryptGuess = null;
-        g.teams[turnTeam].decryptReady = [];
-      } else if (guessType === 'intercept' && playerTeam === opponentTeam) {
-        g.teams[opponentTeam].interceptGuess = null;
-        g.teams[opponentTeam].interceptReady = [];
+      const target = this.resolveGuessTarget(sender.id, guessType);
+      if (!target) return;
+      const board = g.teams[target.teamKey];
+
+      if (guessType === 'decrypt') {
+        board.decryptGuess = null;
+        board.decryptReady = [];
+      } else {
+        board.interceptGuess = null;
+        board.interceptReady = [];
       }
     }
     this.broadcastState();
@@ -577,7 +621,8 @@ export class DecryptoServer extends Server {
         }
       } else {
         if (team && team === pTeam) {
-          if (team === g.currentTeamTurn) {
+          const isDecrypting = g.phase === 'GUESS_BOTH' || team === g.currentTeamTurn;
+          if (isDecrypting) {
             const encId = g.teams[team].playerIds[g.teams[team].encryptorIndex % g.teams[team].playerIds.length];
             if (p.id !== encId) {
               shouldSend = true;
@@ -589,8 +634,10 @@ export class DecryptoServer extends Server {
       }
 
       if (shouldSend) {
-        const conn = this.getConnection(p.id);
-        if (conn) {
+        // getConnection() wants the socket's connection id, not our playerId
+        const connId = this.playerToConnId.get(p.id);
+        const conn = connId ? this.getConnection(connId) : null;
+        if (conn && p.isOnline) {
           conn.send(JSON.stringify({
             type: 'wire-sync-forward',
             senderId: sender.id,
@@ -617,17 +664,16 @@ export class DecryptoServer extends Server {
         g.interceptReady = [];
       }
     } else {
-      const turnTeam = g.currentTeamTurn;
-      if (!turnTeam) return;
-      const opponentTeam = turnTeam === 'A' ? 'B' : 'A';
-      const playerTeam = this.getPlayerTeam(sender.id);
-      
-      if (guessType === 'decrypt' && playerTeam === turnTeam) {
-        g.teams[turnTeam].decryptConnections = data.connections;
-        g.teams[turnTeam].decryptReady = [];
-      } else if (guessType === 'intercept' && playerTeam === opponentTeam) {
-        g.teams[opponentTeam].interceptConnections = data.connections;
-        g.teams[opponentTeam].interceptReady = [];
+      const target = this.resolveGuessTarget(sender.id, guessType);
+      if (!target) return;
+      const board = g.teams[target.teamKey];
+
+      if (guessType === 'decrypt') {
+        board.decryptConnections = data.connections;
+        board.decryptReady = [];
+      } else {
+        board.interceptConnections = data.connections;
+        board.interceptReady = [];
       }
     }
     
@@ -657,20 +703,18 @@ export class DecryptoServer extends Server {
         requiredCount = 1;
       }
     } else {
-      const turnTeam = g.currentTeamTurn;
-      if (!turnTeam) return;
-      const opponentTeam = turnTeam === 'A' ? 'B' : 'A';
-      const playerTeam = this.getPlayerTeam(sender.id);
-      
-      if (guessType === 'decrypt' && playerTeam === turnTeam) {
-        targetReadyArray = g.teams[turnTeam].decryptReady;
-        targetConnections = g.teams[turnTeam].decryptConnections;
-        const activeMembers = this.players.filter(p => p.team === turnTeam).length;
-        requiredCount = Math.max(1, activeMembers - 1);
-      } else if (guessType === 'intercept' && playerTeam === opponentTeam) {
-        targetReadyArray = g.teams[opponentTeam].interceptReady;
-        targetConnections = g.teams[opponentTeam].interceptConnections;
-        const activeMembers = this.players.filter(p => p.team === opponentTeam).length;
+      const target = this.resolveGuessTarget(sender.id, guessType);
+      if (!target) return;
+      const board = g.teams[target.teamKey];
+      const activeMembers = this.players.filter(p => p.team === target.teamKey).length;
+
+      if (guessType === 'decrypt') {
+        targetReadyArray = board.decryptReady;
+        targetConnections = board.decryptConnections;
+        requiredCount = Math.max(1, activeMembers - 1); // encryptor doesn't guess
+      } else {
+        targetReadyArray = board.interceptReady;
+        targetConnections = board.interceptConnections;
         requiredCount = Math.max(1, activeMembers);
       }
     }
@@ -772,24 +816,29 @@ export class DecryptoServer extends Server {
 
         g.teams.B.decryptGuess = null;
         g.teams.A.interceptGuess = null;
-      } else if (g.phase === 'REVEAL_B') {
-        const endResult = this.checkTeamEndConditions();
-        if (endResult) {
-          g.phase = 'GAME_OVER';
-          g.winner = endResult;
-        } else if (g.round >= g.maxRounds) {
-          g.phase = 'GAME_OVER';
-          g.winner = this.calculateTiebreaker();
-        } else {
-          g.round++;
-          g.teams.A.encryptorIndex = (g.teams.A.encryptorIndex + 1) % g.teams.A.playerIds.length;
-          g.teams.B.encryptorIndex = (g.teams.B.encryptorIndex + 1) % g.teams.B.playerIds.length;
-          this.startRoundTeam();
-        }
+      } else if (g.phase === 'REVEAL_B' || g.phase === 'REVEAL_BOTH') {
+        this.finishTeamRound();
       }
     }
 
     this.broadcastState();
+  }
+
+  finishTeamRound() {
+    const g = this.game;
+    const endResult = this.checkTeamEndConditions();
+    if (endResult) {
+      g.phase = 'GAME_OVER';
+      g.winner = endResult;
+    } else if (g.round >= g.maxRounds) {
+      g.phase = 'GAME_OVER';
+      g.winner = this.calculateTiebreaker();
+    } else {
+      g.round++;
+      g.teams.A.encryptorIndex = (g.teams.A.encryptorIndex + 1) % g.teams.A.playerIds.length;
+      g.teams.B.encryptorIndex = (g.teams.B.encryptorIndex + 1) % g.teams.B.playerIds.length;
+      this.startRoundTeam();
+    }
   }
 
   // ── Win/Loss checks ──────────────────────────────────────
@@ -835,6 +884,18 @@ export class DecryptoServer extends Server {
   }
 
   // ── Helpers ──────────────────────────────────────────────
+
+  buildTeamReveal(teamKey) {
+    const team = this.game.teams[teamKey];
+    const hist = this.game.history[teamKey];
+    const last = hist[hist.length - 1];
+    return {
+      clues: team.clues,
+      code: team.code,
+      decryptGuess: team.decryptGuess,
+      decryptCorrect: last ? last.decryptCorrect : false,
+    };
+  }
 
   getPlayerTeam(playerId) {
     const g = this.game;
@@ -1038,7 +1099,8 @@ export class DecryptoServer extends Server {
       
       // Calculate active guessers count for this team
       const onlineTeamMembers = this.players.filter(p => p.team === myTeam && p.isOnline).length;
-      if (g.currentTeamTurn === myTeam || (!g.currentTeamTurn && myRole === 'encryptor')) {
+      const myTeamDecrypting = g.phase === 'GUESS_BOTH' || g.currentTeamTurn === myTeam;
+      if (myTeamDecrypting) {
         state.activeGuessersCount = Math.max(1, onlineTeamMembers - 1);
       } else {
         state.activeGuessersCount = Math.max(1, onlineTeamMembers);
@@ -1056,6 +1118,23 @@ export class DecryptoServer extends Server {
       state.decryptSubmitted = ownTeam.decryptGuess !== null;
       state.interceptSubmitted = oppTeam.interceptGuess !== null;
       state.needIntercept = g.round >= 2;
+    }
+
+    // Round 1: both teams decrypt at once. Each player only sees their own team's clues.
+    if (g.phase === 'GUESS_BOTH' && myTeam) {
+      state.currentClues = g.teams[myTeam].clues;
+      state.decryptSubmitted = g.teams[myTeam].decryptGuess !== null;
+      state.opponentDecryptSubmitted = g.teams[oppTeamKey].decryptGuess !== null;
+      state.interceptSubmitted = false;
+      state.needIntercept = false;
+    }
+
+    // Round 1 reveal: both teams' clues, codes and guesses at once.
+    if (g.phase === 'REVEAL_BOTH') {
+      state.revealBoth = {
+        A: this.buildTeamReveal('A'),
+        B: this.buildTeamReveal('B'),
+      };
     }
 
     // Reveal info
