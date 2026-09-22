@@ -45,7 +45,9 @@ function getMyGuessType(s) {
 const $ = id => document.getElementById(id);
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  $(id).classList.add('active');
+  const screen = $(id);
+  screen.style.removeProperty('display');
+  screen.classList.add('active');
 };
 
 function showToast(msg) {
@@ -55,19 +57,42 @@ function showToast(msg) {
   setTimeout(() => toast.classList.remove('show'), 2500);
 }
 
+function showJoinError(message) {
+  const error = $('join-error');
+  const codeInput = $('join-code');
+  if (!error || !codeInput) {
+    showToast(message);
+    return;
+  }
+
+  error.textContent = message;
+  error.classList.add('show');
+  codeInput.setAttribute('aria-invalid', 'true');
+}
+
+function clearJoinError() {
+  const error = $('join-error');
+  const codeInput = $('join-code');
+  if (error) {
+    error.textContent = '';
+    error.classList.remove('show');
+  }
+  codeInput?.removeAttribute('aria-invalid');
+}
+
 // ── Connection ──────────────────────────────────────────────
 
 function connect(roomCode, playerName, isCreating = false) {
   const host = location.host;
-
-  socket = new PartySocket({
+  const roomSocket = new PartySocket({
     host: host,
     room: roomCode,
     party: 'decrypto-server'
   });
+  socket = roomSocket;
 
-  socket.addEventListener('open', () => {
-    socket.send(JSON.stringify({ type: 'join', name: playerName, isCreating, playerId }));
+  roomSocket.addEventListener('open', () => {
+    roomSocket.send(JSON.stringify({ type: 'join', name: playerName, isCreating, playerId }));
     
     // Update URL
     const url = new URL(window.location);
@@ -75,7 +100,7 @@ function connect(roomCode, playerName, isCreating = false) {
     window.history.pushState({}, '', url);
   });
 
-  socket.addEventListener('message', (event) => {
+  roomSocket.addEventListener('message', (event) => {
     const data = JSON.parse(event.data);
     if (data.type === 'state') {
       const oldPhase = state?.phase;
@@ -84,20 +109,36 @@ function connect(roomCode, playerName, isCreating = false) {
       render();
       updateChatUI();
     } else if (data.type === 'error') {
-      showToast(data.message);
-      if (data.message === 'Phòng này không tồn tại!' || data.message === 'Game đang diễn ra, không thể tham gia.') {
-        socket.intentionalClose = true;
-        socket.close();
+      if (data.message === 'Phòng này không tồn tại!') {
+        // The server creates a temporary room to answer the join request. Close
+        // that connection, but keep the user on the join form so they can fix
+        // the code without being sent back to the main menu.
+        if (socket !== roomSocket) return;
+        showJoinError(data.message);
+        roomSocket.intentionalClose = true;
+        roomSocket.close();
+        socket = null;
+        state = null;
+        showScreen('home-screen');
+        showHomeMenu('menu-join');
+        $('join-code').focus();
+      } else if (data.message === 'Game đang diễn ra, không thể tham gia.') {
+        showToast(data.message);
+        roomSocket.intentionalClose = true;
+        roomSocket.close();
+        if (socket === roomSocket) socket = null;
         showScreen('home-screen');
         showHomeMenu('menu-main');
+      } else {
+        showToast(data.message);
       }
     } else if (data.type === 'wire-sync-forward') {
       handleWireSync(data);
     }
   });
 
-  socket.addEventListener('close', () => {
-    if (!socket.intentionalClose) {
+  roomSocket.addEventListener('close', () => {
+    if (!roomSocket.intentionalClose) {
       showToast('Mất kết nối. Tải lại trang để chơi lại.');
     }
   });
@@ -230,6 +271,7 @@ $('btn-menu-create').addEventListener('click', () => {
 
 $('btn-menu-join').addEventListener('click', () => {
   showHomeMenu('menu-join');
+  clearJoinError();
   $('join-name').focus();
 });
 
@@ -247,10 +289,15 @@ $('btn-create').addEventListener('click', () => {
 });
 
 $('btn-join').addEventListener('click', () => {
+  clearJoinError();
   const name = $('join-name').value.trim();
   const code = $('join-code').value.trim();
   if (!name) { showToast('Vui lòng nhập tên'); return; }
-  if (!code || code.length < 4) { showToast('Vui lòng nhập mã phòng hợp lệ'); return; }
+  if (!code || code.length < 4) {
+    showJoinError('Vui lòng nhập mã phòng hợp lệ');
+    $('join-code').focus();
+    return;
+  }
   localStorage.setItem(PLAYER_NAME_KEY, name);
   connect(code, name, false);
 });
@@ -269,6 +316,9 @@ $('join-name').addEventListener('keydown', e => {
 $('join-code').addEventListener('keydown', e => {
   if (e.key === 'Enter') $('btn-join').click();
 });
+
+$('join-name').addEventListener('input', clearJoinError);
+$('join-code').addEventListener('input', clearJoinError);
 
 function generateCode() {
   const chars = '0123456789';

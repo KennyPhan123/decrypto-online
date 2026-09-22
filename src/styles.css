@@ -176,6 +176,26 @@ body {
   border-color: var(--primary);
 }
 
+.input-group input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+.form-error {
+  display: none;
+  margin: -4px 0 0;
+  padding: 9px 12px;
+  border: 1px solid var(--error);
+  border-radius: var(--radius-sm);
+  background: var(--error-bg);
+  color: var(--error);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.form-error.show {
+  display: block;
+}
+
 .divider {
   display: flex;
   align-items: center;
