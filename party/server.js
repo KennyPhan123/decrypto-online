@@ -30,6 +30,14 @@ function getAllPermutations() {
 
 const ALL_CODES = getAllPermutations(); // 24 permutations
 
+// Clue-writing time limit (the rulebook's 30-second sand timer).
+const CLUE_TIMER_MS = 30000;
+// Extra delay before the SERVER force-submits the pending team's clues.
+// It gives the still-alive encryptor's browser tab time to deliver its own
+// auto-submit (which fires at exactly 30s) first, so a player never loses
+// text they had already typed.
+const CLUE_TIMER_GRACE_MS = 2000;
+
 function pickCode(usedCodes) {
   const available = ALL_CODES.filter(
     c => !usedCodes.some(u => u[0] === c[0] && u[1] === c[1] && u[2] === c[2])
@@ -276,6 +284,9 @@ export class DecryptoServer extends Server {
   startRound3P() {
     const g = this.game;
     g.phase = 'ENCRYPT';
+    // Code cards go back into the deck at the end of every round (official
+    // rules), so the same code may be drawn again in a later round.
+    g.usedCodes = [];
     g.code = pickCode(g.usedCodes);
     g.usedCodes.push(g.code);
     g.clues = [null, null, null];
@@ -358,6 +369,9 @@ export class DecryptoServer extends Server {
 
     for (const key of ['A', 'B']) {
       const team = g.teams[key];
+      // Code cards go back into the deck at the end of every round (official
+      // rules), so the same code may be drawn again in a later round.
+      g.usedCodes[key] = [];
       team.code = pickCode(g.usedCodes[key]);
       g.usedCodes[key].push(team.code);
       team.clues = [null, null, null];
@@ -417,9 +431,54 @@ export class DecryptoServer extends Server {
         g.timerEnd = null;
       } else {
         if (!g.timerEnd) {
-          g.timerEnd = Date.now() + 30000;
+          g.timerEnd = Date.now() + CLUE_TIMER_MS;
+          this.scheduleEncryptTimeoutAlarm();
         }
       }
+    }
+
+    this.broadcastState();
+  }
+
+  // ── Encrypt timer (server-authoritative) ─────────────────
+
+  // Schedule the durable alarm that force-submits the pending team's clues
+  // when the clue timer expires, even if that player's browser is closed or
+  // frozen. Called once, when the timer starts.
+  scheduleEncryptTimeoutAlarm() {
+    const storage = this.ctx && this.ctx.storage;
+    if (!storage || typeof storage.setAlarm !== 'function') return;
+    storage.setAlarm(Date.now() + CLUE_TIMER_MS + CLUE_TIMER_GRACE_MS);
+  }
+
+  onAlarm() {
+    this.enforceEncryptTimeout();
+  }
+
+  enforceEncryptTimeout() {
+    const g = this.game;
+    if (!g || g.mode !== 'team' || g.phase !== 'ENCRYPT' || !g.timerEnd) return;
+
+    // timerEnd is only set when exactly one team has submitted, so there is
+    // exactly one pending team.
+    const pendingKey = !g.teams.A.cluesSubmitted ? 'A' : (!g.teams.B.cluesSubmitted ? 'B' : null);
+    if (!pendingKey) return;
+
+    // Time is up: the pending team risks not having all 3 clues. The server
+    // never received their draft, so submit empty clues on their behalf.
+    const team = g.teams[pendingKey];
+    team.clues = ['', '', ''];
+    team.cluesSubmitted = true;
+
+    if (g.teams.A.cluesSubmitted && g.teams.B.cluesSubmitted) {
+      if (g.round < 2) {
+        g.phase = 'GUESS_BOTH';
+        g.currentTeamTurn = null;
+      } else {
+        g.phase = 'GUESS_A';
+        g.currentTeamTurn = 'A';
+      }
+      g.timerEnd = null;
     }
 
     this.broadcastState();
