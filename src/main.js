@@ -20,6 +20,11 @@ let socket = null;
 let state = null;
 let timerInterval = null;
 
+// Master switch for the mid-game "player disconnected, waiting to reconnect"
+// overlay. Currently OFF — the feature is kept, only the display is disabled.
+// Set this back to true to re-enable the overlay.
+const SHOW_DISCONNECTED_OVERLAY = false;
+
 const KW_COLORS = ['var(--kw-1)', 'var(--kw-2)', 'var(--kw-3)', 'var(--kw-4)'];
 const KW_BG = ['rgba(239, 68, 68, 0.2)', 'rgba(234, 179, 8, 0.2)', 'rgba(34, 197, 94, 0.2)', 'rgba(59, 130, 246, 0.2)'];
 
@@ -420,7 +425,7 @@ function render() {
   const offlinePlayers = state.players.filter(p => !p.isOnline);
   const overlay = $('disconnected-overlay');
   
-  if (state.phase !== 'LOBBY' && state.phase !== 'GAME_OVER' && offlinePlayers.length > 0) {
+  if (SHOW_DISCONNECTED_OVERLAY && state.phase !== 'LOBBY' && state.phase !== 'GAME_OVER' && offlinePlayers.length > 0) {
     overlay.style.display = 'flex';
     let text = `Đang chờ ${offlinePlayers.map(p => p.name).join(', ')} kết nối lại...`;
     $('disconnected-text').textContent = text;
