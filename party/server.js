@@ -968,8 +968,14 @@ export class DecryptoServer extends Server {
 
     if (!isCurrentEncryptor) {
       state.chat = g.chat;
+    }
+
+    // Draft boards are private to each side, even when they are not rendered
+    // by the client. Final guesses are shared separately at reveal below.
+    if (isEncryptor && !isCurrentEncryptor) {
       state.decryptConnections = g.decryptConnections;
       state.decryptReady = g.decryptReady;
+    } else if (isInterceptor) {
       state.interceptConnections = g.interceptConnections;
       state.interceptReady = g.interceptReady;
     }

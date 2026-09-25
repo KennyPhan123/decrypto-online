@@ -70,3 +70,56 @@ test('offline teammates receive no wires', () => {
   server.handleWireSync({ id: 'a1' }, { syncData });
   assert.deepEqual(sent, []);
 });
+
+function threePlayerGame(phase, round, encryptorIndex) {
+  return {
+    mode: '3p', phase, round, maxRounds: 5,
+    encryptors: ['a0', 'a1'], encryptorIndex, interceptorId: 'b0',
+    keywords: ['one', 'two', 'three', 'four'], code: [1, 2, 3],
+    clues: ['first', 'second', 'third'], cluesSubmitted: true,
+    interceptorTokens: 0, history: [], chat: [],
+    decryptConnections: [1, 2, 3], decryptReady: ['a1'],
+    interceptConnections: [3, 2, 1], interceptReady: ['b0'],
+    decryptGuess: [1, 2, 3], interceptGuess: [3, 2, 1],
+  };
+}
+
+for (const round of [1, 2, 3]) {
+  for (const phase of ['ENCRYPT', 'GUESS', 'REVEAL', 'GAME_OVER']) {
+    test(`3p round ${round} ${phase}: state only includes the viewer's draft board`, () => {
+      const index = (round - 1) % 2;
+      const game = threePlayerGame(phase, round, index);
+      const { server } = fixture(game);
+      // Test serialized state, as received on reconnect or a normal broadcast.
+      const view = id => JSON.parse(JSON.stringify(server.getSanitizedState(id)));
+      const decryptor = view(game.encryptors[1 - index]);
+      const interceptor = view('b0');
+      assert.deepEqual(decryptor.decryptConnections, game.decryptConnections);
+      assert.deepEqual(decryptor.decryptReady, game.decryptReady);
+      assert.ok(!('interceptConnections' in decryptor));
+      assert.ok(!('interceptReady' in decryptor));
+      assert.deepEqual(interceptor.interceptConnections, game.interceptConnections);
+      assert.deepEqual(interceptor.interceptReady, game.interceptReady);
+      assert.ok(!('decryptConnections' in interceptor));
+      assert.ok(!('decryptReady' in interceptor));
+      for (const id of [game.encryptors[index], 'spectator']) {
+        const state = view(id);
+        for (const key of ['decryptConnections', 'decryptReady', 'interceptConnections', 'interceptReady']) {
+          assert.ok(!(key in state), `${id} must not receive ${key}`);
+        }
+      }
+      for (const id of [...game.encryptors, 'b0']) {
+        const state = view(id);
+        if (phase === 'REVEAL' || phase === 'GAME_OVER') {
+          assert.deepEqual(state.decryptGuess, game.decryptGuess);
+          assert.deepEqual(state.interceptGuess, game.interceptGuess);
+          assert.deepEqual(state.revealCode, game.code);
+        } else {
+          assert.ok(!('decryptGuess' in state));
+          assert.ok(!('interceptGuess' in state));
+          assert.ok(!('revealCode' in state));
+        }
+      }
+    });
+  }
+}
