@@ -605,35 +605,20 @@ export class DecryptoServer extends Server {
 
   handleWireSync(sender, data) {
     const g = this.game;
-    if (!g) return;
+    // Three-player mode has only one guesser per side, never collaborators.
+    if (!g || g.mode !== 'team') return;
 
     const team = this.getPlayerTeam(sender.id);
-    
+    const guessType = g.phase === 'GUESS_BOTH' || team === g.currentTeamTurn
+      ? 'decrypt' : 'intercept';
+    const target = this.resolveGuessTarget(sender.id, guessType);
+    if (!target) return;
+
     for (const p of this.players) {
-      if (p.id === sender.id) continue; // Don't send back to sender
-      
-      const pTeam = this.getPlayerTeam(p.id);
-      
-      let shouldSend = false;
-      if (g.mode === '3p') {
-        const isSenderEncryptor = g.encryptors[g.encryptorIndex] === sender.id;
-        const isPEncryptor = g.encryptors[g.encryptorIndex] === p.id;
-        if (!isSenderEncryptor && !isPEncryptor) {
-          shouldSend = true;
-        }
-      } else {
-        if (team && team === pTeam) {
-          const isDecrypting = g.phase === 'GUESS_BOTH' || team === g.currentTeamTurn;
-          if (isDecrypting) {
-            const encId = g.teams[team].playerIds[g.teams[team].encryptorIndex % g.teams[team].playerIds.length];
-            if (p.id !== encId) {
-              shouldSend = true;
-            }
-          } else {
-            shouldSend = true;
-          }
-        }
-      }
+      if (p.id === sender.id) continue;
+
+      const recipientTarget = this.resolveGuessTarget(p.id, guessType);
+      const shouldSend = recipientTarget?.teamKey === target.teamKey;
 
       if (shouldSend) {
         // getConnection() wants the socket's connection id, not our playerId
@@ -983,8 +968,14 @@ export class DecryptoServer extends Server {
 
     if (!isCurrentEncryptor) {
       state.chat = g.chat;
+    }
+
+    // Draft boards are private to each side, even when they are not rendered
+    // by the client. Final guesses are shared separately at reveal below.
+    if (isEncryptor && !isCurrentEncryptor) {
       state.decryptConnections = g.decryptConnections;
       state.decryptReady = g.decryptReady;
+    } else if (isInterceptor) {
       state.interceptConnections = g.interceptConnections;
       state.interceptReady = g.interceptReady;
     }
