@@ -113,6 +113,22 @@ function connect(roomCode, playerName, isCreating = false) {
       if (oldPhase !== state.phase) clearGhostWires();
       render();
       updateChatUI();
+    } else if (data.type === 'kicked') {
+      // The host removed this player: drop the connection, forget the game and
+      // tell them why. The room code is cleared so a reload does not rejoin.
+      if (socket === roomSocket) socket = null;
+      roomSocket.intentionalClose = true;
+      roomSocket.close();
+      state = null;
+      window.currentActionState = null;
+      clearGhostWires();
+      closeInfo();
+      closeConfirm();
+      const url = new URL(window.location);
+      url.searchParams.delete('room');
+      window.history.pushState({}, '', url);
+      $('kicked-text').textContent = data.message || 'Bạn đã bị mời ra khỏi phòng.';
+      $('kicked-overlay').style.display = 'flex';
     } else if (data.type === 'error') {
       if (data.message === 'Phòng này không tồn tại!') {
         // The server creates a temporary room to answer the join request. Close
@@ -161,25 +177,34 @@ function updateChatUI() {
   const s = state;
   const container = $('chat-container');
   const panel = $('chat-panel');
+  const toggle = $('chat-toggle');
   const messagesEl = $('chat-messages');
   const badge = $('chat-badge');
-  const btnSend = $('chat-form').querySelector('button');
 
-  if (!s || s.phase === 'LOBBY' || s.myRole === 'encryptor' || (s.activeGuessersCount && s.activeGuessersCount < 2)) {
+  // The chat is only for teammates wiring the same board together: it shows
+  // during a guess phase and only when more than one player of the team is at
+  // the board (3-player mode never has collaborators, so it stays hidden).
+  const canChat = !!s
+    && s.mode === 'team'
+    && typeof s.phase === 'string' && s.phase.startsWith('GUESS')
+    && s.myRole !== 'encryptor'
+    && (s.activeGuessersCount || 0) > 1;
+
+  if (!canChat) {
     container.style.display = 'none';
+    panel.style.display = 'none';
+    toggle.style.display = 'flex';
+    badge.style.display = 'none';
+    chatUnread = 0;
     return;
   }
   container.style.display = 'flex';
-  
-  if (btnSend) {
-    btnSend.textContent = (s.activeGuessersCount === 1) ? 'Gửi' : 'Gửi';
-  }
 
-  const newMsgCount = state.chat.length;
+  const newMsgCount = (s.chat || []).length;
   const currentCount = messagesEl.children.length;
   
   if (newMsgCount !== currentCount) {
-    messagesEl.innerHTML = state.chat.map(msg => {
+    messagesEl.innerHTML = (s.chat || []).map(msg => {
       const isSelf = msg.senderId === state.myId;
       return `
         <div class="chat-msg ${isSelf ? 'self' : 'other'}">
@@ -376,10 +401,176 @@ $('btn-leave-room')?.addEventListener('click', () => {
 $('team-a-col').addEventListener('click', () => send({ type: 'switch-team', target: 'A' }));
 $('team-b-col').addEventListener('click', () => send({ type: 'switch-team', target: 'B' }));
 
-// ── History Toggle ──────────────────────────────────────────
+// ── Game Details / Kick ─────────────────────────────────────
 
-$('history-toggle').addEventListener('click', () => {
-  $('history-panel').classList.toggle('open');
+// The whole top bar is the hitbox that opens the game details.
+$('game-topbar').addEventListener('click', openInfo);
+$('game-topbar').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    openInfo();
+  }
+});
+
+$('info-close').addEventListener('click', closeInfo);
+$('info-modal').addEventListener('click', (e) => {
+  if (e.target === $('info-modal')) closeInfo();
+});
+
+$('info-body').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-kick]');
+  if (!btn) return;
+  requestKick(btn.dataset.kick);
+});
+
+function openInfo() {
+  if (!state || state.phase === 'LOBBY' || state.phase === 'GAME_OVER') return;
+  $('info-modal').style.display = 'flex';
+  renderInfoModal();
+}
+
+function closeInfo() {
+  $('info-modal').style.display = 'none';
+}
+
+function isInfoOpen() {
+  return $('info-modal').style.display === 'flex';
+}
+
+function renderInfoModal() {
+  const s = state;
+  if (!s) return;
+
+  const isHost = !!s.players.find(p => p.id === s.myId && p.isHost);
+
+  const playerRow = (id, roleTag) => {
+    const p = s.players.find(x => x.id === id);
+    if (!p) return '';
+    const tags = [
+      roleTag,
+      p.id === s.myId ? 'bạn' : '',
+      p.isHost ? 'chủ phòng' : '',
+      p.isOnline ? '' : 'offline',
+    ].filter(Boolean).join(' · ');
+    const kickBtn = isHost && p.id !== s.myId
+      ? `<button class="btn-kick" data-kick="${esc(p.id)}">Kick</button>`
+      : '';
+    return `
+      <div class="info-row">
+        <span class="info-name">${esc(p.name)}${tags ? `<span class="info-tag">${tags}</span>` : ''}</span>
+        ${kickBtn}
+      </div>
+    `;
+  };
+
+  const teamGroup = (key) => {
+    const team = key === 'A' ? s.teamA : s.teamB;
+    return {
+      label: `Đội ${key}`,
+      cls: `team-${key.toLowerCase()}`,
+      note: `${team.interceptions} chặn · ${team.miscommunications} lỗi`,
+      encryptorId: team.encryptorId,
+      ids: team.players.map(p => p.id),
+    };
+  };
+
+  const groups = s.mode === '3p'
+    ? [
+        { label: 'Đội mã hóa', cls: 'team-a', note: '', encryptorId: s.currentEncryptorId, ids: (s.encryptors || []).map(e => e.id) },
+        { label: 'Kẻ chặn mã', cls: 'team-b', note: `Chặn ${s.interceptorTokens}/2`, ids: s.interceptor ? [s.interceptor.id] : [] },
+      ]
+    : [teamGroup('A'), teamGroup('B')];
+
+  $('info-body').innerHTML = `
+    <div class="info-meta">
+      <span>${s.mode === '3p' ? 'Chế độ 3 người' : 'Chế độ đội'}</span>
+      <span>Vòng ${s.round}/${s.maxRounds}</span>
+    </div>
+    ${groups.map(g => `
+      <div class="info-group">
+        <div class="info-group-head info-${g.cls}">
+          <span>${g.label}</span>
+          ${g.note ? `<span class="info-group-note">${g.note}</span>` : ''}
+        </div>
+        ${g.ids.map(id => playerRow(id, id === g.encryptorId ? 'mã hóa' : '')).join('')}
+      </div>
+    `).join('')}
+  `;
+}
+
+// A kick can only keep the running game alive when at least 4 players stay and
+// both teams still have 2 members. Otherwise the game has to be reset.
+function kickNeedsReset(targetId) {
+  const s = state;
+  if (!s || !s.mode) return false;
+  const rest = s.players.filter(p => p.id !== targetId);
+  if (s.mode !== 'team') return true;
+  if (rest.length < 4) return true;
+  const countA = rest.filter(p => p.team === 'A').length;
+  const countB = rest.filter(p => p.team === 'B').length;
+  return countA < 2 || countB < 2;
+}
+
+function requestKick(targetId) {
+  const s = state;
+  const target = s?.players.find(p => p.id === targetId);
+  if (!target) return;
+
+  if (!kickNeedsReset(targetId)) {
+    send({ type: 'kick', targetId });
+    return;
+  }
+
+  const remaining = s.players.length - 1;
+  let reason = 'Chế độ 3 người cần đủ 3 người chơi.';
+  if (s.mode === 'team') {
+    reason = remaining < 4
+      ? 'Chế độ đội cần ít nhất 4 người, mỗi đội 2 người.'
+      : `Đội ${target.team} sẽ chỉ còn 1 người.`;
+  }
+
+  openConfirm({
+    title: 'Kết thúc ván đấu?',
+    text: `Kick ${target.name} thì chỉ còn ${remaining} người chơi. ${reason} Ván sẽ được đặt lại về phòng chờ để chia lại đội.`,
+    okText: 'Đặt lại về phòng chờ',
+    onOk: () => send({ type: 'kick', targetId, reset: true }),
+  });
+}
+
+// ── Confirm Dialog ──────────────────────────────────────────
+
+let confirmAction = null;
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if ($('confirm-modal').style.display === 'flex') closeConfirm();
+  else if (isInfoOpen()) closeInfo();
+});
+
+function openConfirm({ title, text, okText, onOk }) {
+  $('confirm-title').textContent = title;
+  $('confirm-text').textContent = text;
+  $('confirm-ok').textContent = okText || 'Đồng ý';
+  confirmAction = onOk;
+  $('confirm-modal').style.display = 'flex';
+}
+
+function closeConfirm() {
+  confirmAction = null;
+  $('confirm-modal').style.display = 'none';
+}
+
+$('confirm-cancel').addEventListener('click', closeConfirm);
+$('confirm-ok').addEventListener('click', () => {
+  const action = confirmAction;
+  closeConfirm();
+  if (action) action();
+});
+
+$('btn-kicked-home').addEventListener('click', () => {
+  $('kicked-overlay').style.display = 'none';
+  showScreen('home-screen');
+  showHomeMenu('menu-main');
 });
 
 // ── Game Over ───────────────────────────────────────────────
@@ -409,16 +600,20 @@ function render() {
 
   if (state.phase === 'LOBBY') {
     window.currentActionState = null;
+    closeInfo();
+    closeConfirm();
     renderLobby();
     showScreen('lobby-screen');
   } else if (state.phase === 'GAME_OVER') {
     window.currentActionState = null;
+    closeInfo();
     renderGameOver();
     showScreen('gameover-screen');
   } else {
     renderGame();
     showScreen('game-screen');
     startTimer();
+    if (isInfoOpen()) renderInfoModal();
   }
 
   // Handle disconnected overlay (only during game)
@@ -698,7 +893,6 @@ function renderEncryptPhase(area) {
     area.dataset.renderedPhase = '';
     area.innerHTML = `
       <div class="encrypt-code-display fade-in">
-        <div class="encrypt-code-label">Mã số cần truyền đạt</div>
         <div class="encrypt-code-numbers">
           ${s.code.map(d => `<div class="code-digit" style="background:${KW_COLORS[d - 1]}">${d}</div>`).join('')}
         </div>
@@ -835,14 +1029,14 @@ function renderGuess3P(clues) {
       html += renderCluesOnly(clues);
       html += `<div class="guess-submitted">Bạn đã gửi dự đoán<span class="waiting-dots"></span></div>`;
     } else {
-      html += renderGuessForm('intercept', 'Chặn mã', clues, null);
+      html += renderGuessForm('intercept', 'Chặn mã', clues, null, clueAuthor());
     }
   } else {
     if (s.decryptSubmitted) {
       html += renderCluesOnly(clues);
       html += `<div class="guess-submitted">Đội bạn đã gửi dự đoán<span class="waiting-dots"></span></div>`;
     } else {
-      html += renderGuessForm('decrypt', 'Giải mã', clues, s.keywords);
+      html += renderGuessForm('decrypt', 'Giải mã', clues, s.keywords, clueAuthor());
     }
   }
 
@@ -865,7 +1059,7 @@ function renderGuessTeam(clues) {
       html += renderCluesOnly(clues);
       html += `<div class="guess-submitted">Đội bạn đã gửi dự đoán. Đang chờ đội ${oppTeam}<span class="waiting-dots"></span></div>`;
     } else {
-      html += renderGuessForm('decrypt', 'Giải mã', clues, s.keywords);
+      html += renderGuessForm('decrypt', 'Giải mã', clues, s.keywords, clueAuthor(s.myTeam));
     }
   } else {
     if (s.round < 2) {
@@ -875,17 +1069,34 @@ function renderGuessTeam(clues) {
       html += renderCluesOnly(clues);
       html += `<div class="guess-submitted">Đội bạn đã gửi dự đoán<span class="waiting-dots"></span></div>`;
     } else {
-      html += renderGuessForm('intercept', 'Chặn mã', clues, null);
+      html += renderGuessForm('intercept', 'Chặn mã', clues, null, clueAuthor(s.currentTeamTurn));
     }
   }
 
   return html;
 }
 
-function renderGuessForm(guessType, title, clues, keywords) {
+// Short "who wrote these clues" line: player name + their team. The clues on
+// the board always belong to one encryptor, so the guessers can see whose
+// clues they are wiring.
+function clueAuthor(teamKey = null) {
+  const s = state;
+  if (s.mode === '3p') {
+    const enc = (s.encryptors || []).find(e => e.id === s.currentEncryptorId);
+    return `Gợi ý của ${enc ? enc.name : '?'} · Đội mã hóa`;
+  }
+  const team = teamKey === 'A' ? s.teamA : s.teamB;
+  const encName = team?.players?.find(p => p.id === team.encryptorId)?.name;
+  return `Gợi ý của ${encName || '?'} · Đội ${teamKey}`;
+}
+
+function renderGuessForm(guessType, title, clues, keywords, author) {
   return `
     <div class="guess-section fade-in">
-      <div class="guess-section-title">${title}</div>
+      <div class="guess-section-head">
+        <div class="guess-section-title">${title}</div>
+        ${author ? `<div class="guess-section-author">${esc(author)}</div>` : ''}
+      </div>
       <div class="wire-task-container" id="wire-task">
         <svg class="wire-svg" id="wire-svg"></svg>
         <div class="wire-col left-col">

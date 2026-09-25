@@ -101,23 +101,7 @@ export class DecryptoServer extends Server {
       this.broadcastState();
       return;
     } else if (data.type === 'kick') {
-      const p = this.players.find(pl => pl.id === playerId);
-      if (!p || !p.isHost) return;
-      
-      const kickId = data.targetId;
-      const kickIdx = this.players.findIndex(pl => pl.id === kickId);
-      if (kickIdx !== -1) {
-        this.players.splice(kickIdx, 1);
-        const kickConnId = this.playerToConnId.get(kickId);
-        if (kickConnId) {
-          const c = this.getConnection(kickConnId);
-          if (c) this.sendError(c, 'Bạn đã bị kick khỏi phòng!');
-          this.connToPlayerId.delete(kickConnId);
-        }
-        this.playerToConnId.delete(kickId);
-        if (this.players.length === 0) this.game = null;
-        this.broadcastState();
-      }
+      this.handleKick(playerId, data);
       return;
     }
 
@@ -200,6 +184,111 @@ export class DecryptoServer extends Server {
     
     player.team = targetTeam;
     this.broadcastState();
+  }
+
+  // ── Kick ─────────────────────────────────────────────────
+
+  /**
+   * Only the host can remove a player. While a game is running the kick is
+   * applied straight away only when the remaining players can keep playing
+   * (team mode with 4+ players and at least 2 per team). If the kick would
+   * drop the table below a playable size, the game has to be reset back to the
+   * lobby — the client asks the host to confirm and resends the kick with
+   * `reset: true`. Unconfirmed kicks are ignored, so the game can never be
+   * left in an unplayable state.
+   */
+  handleKick(kickerId, data) {
+    const kicker = this.players.find(p => p.id === kickerId);
+    if (!kicker || !kicker.isHost) return;
+    if (!data.targetId || data.targetId === kickerId) return;
+
+    const target = this.players.find(p => p.id === data.targetId);
+    if (!target) return;
+
+    const inGame = !!this.game && this.game.phase !== 'GAME_OVER';
+    const mustReset = inGame && !this.gameCanContinueWithout(target.id);
+    if (mustReset && data.reset !== true) return;
+
+    this.detachPlayer(target);
+
+    if (inGame) {
+      if (mustReset) this.game = null; // everyone goes back to the lobby
+      else this.removePlayerFromGame(target.id);
+    }
+
+    if (this.players.length === 0) this.game = null;
+
+    this.broadcastState();
+  }
+
+  // Drop a player from the table and tell them why they are gone.
+  detachPlayer(target) {
+    const idx = this.players.findIndex(p => p.id === target.id);
+    if (idx === -1) return;
+    this.players.splice(idx, 1);
+    if (this.players.length > 0 && target.isHost) this.players[0].isHost = true;
+
+    const connId = this.playerToConnId.get(target.id);
+    if (connId) {
+      const conn = this.getConnection(connId);
+      if (conn) {
+        conn.send(JSON.stringify({
+          type: 'kicked',
+          message: 'Bạn đã bị mời ra khỏi phòng.',
+        }));
+      }
+      this.connToPlayerId.delete(connId);
+    }
+    this.playerToConnId.delete(target.id);
+  }
+
+  // Can the running game survive without this player?
+  gameCanContinueWithout(playerId) {
+    const g = this.game;
+    if (!g || g.phase === 'GAME_OVER') return true;
+    // 3-player mode needs both encryptors and the interceptor.
+    if (g.mode !== 'team') return false;
+
+    const remaining = this.players.filter(p => p.id !== playerId);
+    if (remaining.length < 4) return false;
+    const countA = remaining.filter(p => p.team === 'A').length;
+    const countB = remaining.filter(p => p.team === 'B').length;
+    return countA >= 2 && countB >= 2;
+  }
+
+  // Take a player out of the running game. The encryptor of a team is kept
+  // valid: if the leaving player was the current encryptor, the role moves to
+  // the next player in the rotation, otherwise the same player keeps it.
+  removePlayerFromGame(playerId) {
+    const g = this.game;
+    if (!g) return;
+
+    for (const key of ['A', 'B']) {
+      const team = g.teams?.[key];
+      if (!team) continue;
+
+      const idx = team.playerIds.indexOf(playerId);
+      if (idx !== -1) {
+        const count = team.playerIds.length;
+        const currentIndex = team.encryptorIndex % count;
+        team.playerIds.splice(idx, 1);
+
+        const remaining = team.playerIds.length;
+        if (remaining === 0) team.encryptorIndex = 0;
+        else if (idx < currentIndex) team.encryptorIndex = currentIndex - 1;
+        else if (idx > currentIndex) team.encryptorIndex = currentIndex;
+        else team.encryptorIndex = currentIndex % remaining;
+      }
+
+      team.decryptReady = (team.decryptReady || []).filter(id => id !== playerId);
+      team.interceptReady = (team.interceptReady || []).filter(id => id !== playerId);
+      team.chat = (team.chat || []).filter(m => m.senderId !== playerId);
+    }
+
+    g.encryptors = (g.encryptors || []).filter(id => id !== playerId);
+    g.decryptReady = (g.decryptReady || []).filter(id => id !== playerId);
+    g.interceptReady = (g.interceptReady || []).filter(id => id !== playerId);
+    g.chat = (g.chat || []).filter(m => m.senderId !== playerId);
   }
 
   handleStart(sender) {
@@ -649,6 +738,7 @@ export class DecryptoServer extends Server {
     if (!team && g.mode !== '3p') return;
 
     const msg = {
+      senderId: sender.id,
       senderName: this.players.find(p => p.id === sender.id)?.name || 'Unknown',
       text: data.text,
     };

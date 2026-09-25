@@ -95,8 +95,8 @@
   <div id="game-screen" class="screen">
     <div class="game-container">
 
-      <!-- Top Bar -->
-      <div class="game-topbar">
+      <!-- Top Bar (tap anywhere on it to open the game details) -->
+      <div class="game-topbar" id="game-topbar" role="button" tabindex="0" title="Chi tiết ván đấu">
         <div class="topbar-left">
           <div class="topbar-round">
             <span class="topbar-label">Vòng</span>
@@ -107,6 +107,7 @@
         <div id="topbar-right">
           <div id="topbar-timer" class="topbar-timer" style="display:none">60s</div>
           <div id="topbar-tokens" class="topbar-tokens"></div>
+          <svg class="topbar-hint" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
       </div>
 
@@ -122,11 +123,10 @@
       <!-- Action Area (changes per phase) -->
       <div id="action-area" class="action-area"></div>
 
-      <!-- History Panel -->
+      <!-- History Panel (always expanded) -->
       <div id="history-panel" class="history-panel">
-        <div class="history-header" id="history-toggle">
+        <div class="history-header">
           <span>Lịch sử gợi ý</span>
-          <svg class="history-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="history-content" class="history-content">
           <div id="history-tables"></div>
@@ -142,11 +142,11 @@
       <h2 id="gameover-title"></h2>
       <div id="gameover-summary" class="gameover-summary"></div>
       <div id="gameover-keywords" class="gameover-keywords"></div>
-      <div class="history-panel expanded" style="margin: 20px 0; border: 1px solid var(--border); border-radius: 8px;">
-        <div class="history-header" style="pointer-events: none; justify-content: center; background: var(--surface-alt)">
+      <div class="history-panel" style="margin: 20px 0; border: 1px solid var(--border); border-radius: 8px;">
+        <div class="history-header" style="justify-content: center; background: var(--surface-alt)">
           <span>Lịch sử gợi ý</span>
         </div>
-        <div class="history-content" style="display: block; padding-top: 0">
+        <div class="history-content" style="padding-top: 0">
           <div id="gameover-history"></div>
         </div>
       </div>
@@ -175,6 +175,48 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         </button>
       </form>
+    </div>
+  </div>
+
+  <!-- ─── GAME DETAILS ─── -->
+  <div id="info-modal" class="modal-overlay" style="display:none">
+    <div class="modal-card">
+      <div class="modal-head">
+        <span class="modal-title">Ván đấu</span>
+        <button id="info-close" class="btn-icon" title="Đóng">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div id="info-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- ─── CONFIRMATION ─── -->
+  <div id="confirm-modal" class="modal-overlay" style="display:none">
+    <div class="modal-card">
+      <div class="modal-head">
+        <span class="modal-title" id="confirm-title"></span>
+      </div>
+      <div class="modal-body">
+        <p id="confirm-text" class="modal-text"></p>
+      </div>
+      <div class="modal-actions">
+        <button id="confirm-cancel" class="btn btn-secondary btn-small">Hủy</button>
+        <button id="confirm-ok" class="btn btn-primary btn-small">Đồng ý</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── KICKED NOTICE ─── -->
+  <div id="kicked-overlay" class="modal-overlay" style="display:none">
+    <div class="modal-card modal-card-center">
+      <div class="modal-body">
+        <p class="modal-title">Bạn đã rời phòng</p>
+        <p id="kicked-text" class="modal-text"></p>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-kicked-home" class="btn btn-primary btn-small">Về trang chủ</button>
+      </div>
     </div>
   </div>
 
