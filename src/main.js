@@ -749,13 +749,13 @@ function renderTokens() {
     container.innerHTML = `
       <div class="token-group token-group-a">
         <span class="token-team-label" style="color:var(--team-a)">ĐỘI A</span>
-        <span class="token-item" title="Chặn mã"><span class="token-count token-label-i">${s.teamA.interceptions}</span> Chặn</span>
-        <span class="token-item" title="Đoán sai"><span class="token-count token-label-m">${s.teamA.miscommunications}</span> Lỗi</span>
+        <span class="token-item" title="Chặn mã"><span class="token-count token-label-i">${s.teamA.interceptions}</span></span>
+        <span class="token-item" title="Đoán sai"><span class="token-count token-label-m">${s.teamA.miscommunications}</span></span>
       </div>
       <div class="token-group token-group-b">
         <span class="token-team-label" style="color:var(--team-b)">ĐỘI B</span>
-        <span class="token-item" title="Chặn mã"><span class="token-count token-label-i">${s.teamB.interceptions}</span> Chặn</span>
-        <span class="token-item" title="Đoán sai"><span class="token-count token-label-m">${s.teamB.miscommunications}</span> Lỗi</span>
+        <span class="token-item" title="Chặn mã"><span class="token-count token-label-i">${s.teamB.interceptions}</span></span>
+        <span class="token-item" title="Đoán sai"><span class="token-count token-label-m">${s.teamB.miscommunications}</span></span>
       </div>
     `;
   }
