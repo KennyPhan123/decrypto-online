@@ -218,6 +218,8 @@ $('chat-form').addEventListener('submit', e => {
 });
 
 function handleWireSync(data) {
+  if (state?.mode !== 'team') return;
+
   ghostWires[data.senderId] = {
     senderName: data.senderName,
     syncData: data.syncData,
@@ -932,6 +934,8 @@ function attachGuessHandlers() {
   }
 
   function broadcastWireSync(overrideConnections = null) {
+    if (state?.mode !== 'team') return;
+
     const cRect = container.getBoundingClientRect();
     const connections = overrideConnections || getConnections();
     
