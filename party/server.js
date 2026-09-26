@@ -115,6 +115,7 @@ export class DecryptoServer extends Server {
       case 'switch-team': this.handleSwitchTeam(sender, data); break;
       case 'start': this.handleStart(sender); break;
       case 'submit-clues': this.handleSubmitClues(sender, data); break;
+      case 'clue-draft': this.handleClueDraft(sender, data); break;
       case 'submit-guess': this.handleSubmitGuess(sender, data); break;
       case 'unsubmit-guess': this.handleUnsubmitGuess(sender, data); break;
       case 'chat-msg': this.handleChatMsg(sender, data); break;
@@ -212,8 +213,19 @@ export class DecryptoServer extends Server {
     this.detachPlayer(target);
 
     if (inGame) {
-      if (mustReset) this.game = null; // everyone goes back to the lobby
-      else this.removePlayerFromGame(target.id);
+      if (mustReset) {
+        this.game = null; // everyone goes back to the lobby
+      } else {
+        // Keep the running game consistent the moment the kick lands:
+        //  - keep whatever the kicked encryptor had already typed,
+        //  - take the player out of every board/rotation tally,
+        //  - submit any board that is now fully voted (ready counts changed
+        //    with the kick, and nobody re-clicks a button that already says
+        //    "Sẵn sàng").
+        this.forceSubmitKickedEncryptor(target.id);
+        this.removePlayerFromGame(target.id);
+        this.reconcileReadyBoardsAfterKick();
+      }
     }
 
     if (this.players.length === 0) this.game = null;
@@ -289,6 +301,137 @@ export class DecryptoServer extends Server {
     g.decryptReady = (g.decryptReady || []).filter(id => id !== playerId);
     g.interceptReady = (g.interceptReady || []).filter(id => id !== playerId);
     g.chat = (g.chat || []).filter(m => m.senderId !== playerId);
+  }
+
+  // ── Kick: keep the running game consistent ──────────────────────────
+
+  // How many players have to ready up before a team board submits.
+  // Offline players still count: they stay on the team until the host kicks
+  // them, so every part of the game (client included) uses this same number.
+  requiredReadyCount(teamKey, guessType) {
+    const activeMembers = this.players.filter(p => p.team === teamKey).length;
+    return guessType === 'decrypt'
+      ? Math.max(1, activeMembers - 1) // the encryptor never guesses
+      : Math.max(1, activeMembers);
+  }
+
+  // The encryptor streams their in-progress clues to the server as they type,
+  // so a kick mid-encrypt can still submit the work instead of losing it.
+  handleClueDraft(sender, data) {
+    const g = this.game;
+    if (!g || g.mode !== 'team' || g.phase !== 'ENCRYPT') return;
+
+    const clues = data.clues;
+    if (!Array.isArray(clues) || clues.length !== 3) return;
+    if (clues.some(c => typeof c !== 'string')) return;
+
+    const teamKey = this.getPlayerTeam(sender.id);
+    if (!teamKey) return;
+    const team = g.teams[teamKey];
+    if (team.cluesSubmitted) return;
+
+    const encryptorId = team.playerIds[team.encryptorIndex % team.playerIds.length];
+    if (sender.id !== encryptorId) return;
+
+    team.clueDraft = clues.map(c => c.trim());
+  }
+
+  // Called right before the current encryptor is removed mid-ENCRYPT: submit
+  // whatever they had typed so far on their behalf. If they never typed
+  // anything, the job passes to the next encryptor in the rotation instead of
+  // forcing an empty board.
+  forceSubmitKickedEncryptor(playerId) {
+    const g = this.game;
+    if (!g || g.phase !== 'ENCRYPT' || g.mode !== 'team') return;
+
+    const teamKey = this.getPlayerTeam(playerId);
+    if (!teamKey) return;
+    const team = g.teams[teamKey];
+    if (team.cluesSubmitted) return;
+
+    const encryptorId = team.playerIds[team.encryptorIndex % team.playerIds.length];
+    if (playerId !== encryptorId) return;
+
+    const draft = Array.isArray(team.clueDraft)
+      ? team.clueDraft.map(c => String(c ?? '').trim())
+      : [];
+    if (!draft.some(c => c.length > 0)) return;
+
+    team.clues = [draft[0] || '', draft[1] || '', draft[2] || ''];
+    team.cluesSubmitted = true;
+    team.clueDraft = null;
+
+    this.tryAdvanceAfterCluesSubmitted();
+  }
+
+  // Shared by handleSubmitClues, the encrypt timeout and the kick path:
+  // moves ENCRYPT -> GUESS once both teams have submitted, or keeps/restarts
+  // the 30s sand timer while one team is still pending.
+  tryAdvanceAfterCluesSubmitted() {
+    const g = this.game;
+    if (!(g.teams.A.cluesSubmitted && g.teams.B.cluesSubmitted)) {
+      if (!g.timerEnd) {
+        g.timerEnd = Date.now() + CLUE_TIMER_MS;
+        this.scheduleEncryptTimeoutAlarm();
+      }
+      return;
+    }
+    if (g.round < 2) {
+      // Round 1 has no interception, both decrypts run at the same time.
+      g.phase = 'GUESS_BOTH';
+      g.currentTeamTurn = null;
+    } else {
+      g.phase = 'GUESS_A';
+      g.currentTeamTurn = 'A';
+    }
+    g.timerEnd = null;
+  }
+
+  // A kick changes who may vote and how many votes are needed. Re-check every
+  // active board right away:
+  //  - drop votes from a player who just became the encryptor (rotation),
+  //  - submit boards whose ready tally already meets the new requirement —
+  //    otherwise they sit at "Sẵn sàng (2/2)" forever because the submit check
+  //    normally only runs when someone clicks the ready button.
+  reconcileReadyBoardsAfterKick() {
+    const g = this.game;
+    if (!g || g.mode !== 'team') return;
+    const guessing =
+      g.phase === 'GUESS_BOTH' || g.phase === 'GUESS_A' || g.phase === 'GUESS_B';
+    if (!guessing) return;
+
+    for (const key of ['A', 'B']) {
+      const team = g.teams[key];
+      const encryptorId = team.playerIds[team.encryptorIndex % team.playerIds.length];
+      team.decryptReady = (team.decryptReady || []).filter(id => id !== encryptorId);
+    }
+
+    const boards = g.phase === 'GUESS_BOTH'
+      ? [['A', 'decrypt'], ['B', 'decrypt']]
+      : [
+          [g.currentTeamTurn, 'decrypt'],
+          [g.currentTeamTurn === 'A' ? 'B' : 'A', 'intercept'],
+        ];
+
+    for (const [teamKey, guessType] of boards) {
+      const board = g.teams[teamKey];
+      if (!board) continue;
+      const ready = guessType === 'decrypt' ? board.decryptReady : board.interceptReady;
+      if (!ready || ready.length < this.requiredReadyCount(teamKey, guessType)) continue;
+
+      const guess = guessType === 'decrypt'
+        ? board.decryptConnections
+        : board.interceptConnections;
+      if (!Array.isArray(guess) || guess.length !== 3) continue;
+      if (guess.some(n => typeof n !== 'number' || n < 1 || n > 4)) continue;
+
+      const senderId = ready.find(
+        id => this.resolveGuessTarget(id, guessType)?.teamKey === teamKey
+      );
+      if (!senderId) continue;
+
+      this.handleSubmitGuess({ id: senderId }, { guess, guessType });
+    }
   }
 
   handleStart(sender) {
@@ -465,6 +608,7 @@ export class DecryptoServer extends Server {
       g.usedCodes[key].push(team.code);
       team.clues = [null, null, null];
       team.cluesSubmitted = false;
+      team.clueDraft = null;
       team.decryptGuess = null;
       team.interceptGuess = null;
       team.chat = [];
@@ -506,24 +650,9 @@ export class DecryptoServer extends Server {
 
       t.clues = trimmed;
       t.cluesSubmitted = true;
+      t.clueDraft = null;
 
-      if (g.teams.A.cluesSubmitted && g.teams.B.cluesSubmitted) {
-        if (g.round < 2) {
-          // Round 1 has no interception, so the two decrypts are independent:
-          // let both teams decrypt their own clues at the same time.
-          g.phase = 'GUESS_BOTH';
-          g.currentTeamTurn = null;
-        } else {
-          g.phase = 'GUESS_A';
-          g.currentTeamTurn = 'A';
-        }
-        g.timerEnd = null;
-      } else {
-        if (!g.timerEnd) {
-          g.timerEnd = Date.now() + CLUE_TIMER_MS;
-          this.scheduleEncryptTimeoutAlarm();
-        }
-      }
+      this.tryAdvanceAfterCluesSubmitted();
     }
 
     this.broadcastState();
@@ -553,22 +682,20 @@ export class DecryptoServer extends Server {
     const pendingKey = !g.teams.A.cluesSubmitted ? 'A' : (!g.teams.B.cluesSubmitted ? 'B' : null);
     if (!pendingKey) return;
 
-    // Time is up: the pending team risks not having all 3 clues. The server
-    // never received their draft, so submit empty clues on their behalf.
+    // Time is up: the pending team risks not having all 3 clues. Whatever the
+    // encryptor's browser streamed in as a draft is submitted on their behalf;
+    // only when nothing was ever typed do we fall back to empty clues.
     const team = g.teams[pendingKey];
-    team.clues = ['', '', ''];
+    const draft = Array.isArray(team.clueDraft)
+      ? team.clueDraft.map(c => String(c ?? '').trim())
+      : [];
+    team.clues = draft.some(c => c.length > 0)
+      ? [draft[0] || '', draft[1] || '', draft[2] || '']
+      : ['', '', ''];
     team.cluesSubmitted = true;
+    team.clueDraft = null;
 
-    if (g.teams.A.cluesSubmitted && g.teams.B.cluesSubmitted) {
-      if (g.round < 2) {
-        g.phase = 'GUESS_BOTH';
-        g.currentTeamTurn = null;
-      } else {
-        g.phase = 'GUESS_A';
-        g.currentTeamTurn = 'A';
-      }
-      g.timerEnd = null;
-    }
+    this.tryAdvanceAfterCluesSubmitted();
 
     this.broadcastState();
   }
@@ -842,16 +969,14 @@ export class DecryptoServer extends Server {
       const target = this.resolveGuessTarget(sender.id, guessType);
       if (!target) return;
       const board = g.teams[target.teamKey];
-      const activeMembers = this.players.filter(p => p.team === target.teamKey).length;
+      requiredCount = this.requiredReadyCount(target.teamKey, guessType);
 
       if (guessType === 'decrypt') {
         targetReadyArray = board.decryptReady;
         targetConnections = board.decryptConnections;
-        requiredCount = Math.max(1, activeMembers - 1); // encryptor doesn't guess
       } else {
         targetReadyArray = board.interceptReady;
         targetConnections = board.interceptConnections;
-        requiredCount = Math.max(1, activeMembers);
       }
     }
     
@@ -1239,13 +1364,16 @@ export class DecryptoServer extends Server {
       state.interceptConnections = g.teams[myTeam].interceptConnections;
       state.interceptReady = g.teams[myTeam].interceptReady;
       
-      // Calculate active guessers count for this team
-      const onlineTeamMembers = this.players.filter(p => p.team === myTeam && p.isOnline).length;
+      // How many players may vote on this board. Offline players still count:
+      // the game keeps them on the team (they only leave via a host kick) and
+      // the server's ready tally counts them too, so the client must show the
+      // same number or everyone would appear "ready" while the server waits.
+      const teamMembers = this.players.filter(p => p.team === myTeam).length;
       const myTeamDecrypting = g.phase === 'GUESS_BOTH' || g.currentTeamTurn === myTeam;
       if (myTeamDecrypting) {
-        state.activeGuessersCount = Math.max(1, onlineTeamMembers - 1);
+        state.activeGuessersCount = Math.max(1, teamMembers - 1);
       } else {
-        state.activeGuessersCount = Math.max(1, onlineTeamMembers);
+        state.activeGuessersCount = Math.max(1, teamMembers);
       }
     }
 

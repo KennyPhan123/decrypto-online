@@ -414,6 +414,19 @@ body {
   border-top: 1px solid var(--border-light);
 }
 
+/* Lobby rows hold the player name plus the host's kick button. */
+.lobby-player-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lobby-player-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .waiting-text {
   font-size: 13px;
   color: var(--text-muted);
@@ -1091,6 +1104,27 @@ body {
 /* The clue history is always expanded: there is nothing to toggle. */
 .history-content {
   padding: 0 18px 16px;
+  /* One column per round: by round 7-8 the table runs past the right edge.
+     Make it horizontally scrollable WITHOUT a visible scrollbar — the panel
+     itself is dragged sideways with the mouse (see enableDragScroll in
+     main.js); touch devices keep native momentum scrolling. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge / IE */
+  overscroll-behavior-x: contain;
+}
+
+.history-content::-webkit-scrollbar {
+  display: none; /* WebKit browsers */
+}
+
+.history-content.is-scrollable {
+  cursor: grab;
+}
+
+.history-content.is-dragging {
+  cursor: grabbing;
 }
 
 .history-section-label {
