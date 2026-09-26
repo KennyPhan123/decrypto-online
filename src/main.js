@@ -171,6 +171,70 @@ function send(data) {
   }
 }
 
+// ── Clue draft streaming ────────────────────────────────────
+// While the encryptor types, the draft is mirrored to the server so a kick
+// (or a reload) never loses what was already written.
+let pendingDraftFlush = null;
+
+function sendClueDraft() {
+  if (!$('clue-0')) return; // the encrypt form is not on screen
+  send({
+    type: 'clue-draft',
+    clues: [0, 1, 2].map(i => $(`clue-${i}`)?.value ?? ''),
+  });
+}
+
+window.addEventListener('pagehide', () => {
+  if (pendingDraftFlush) pendingDraftFlush();
+});
+
+// ── Horizontal drag-scroll (history tables) ─────────────────
+// The clue-history tables grow one column per round and overflow to the right.
+// Let people drag them sideways with the mouse while keeping the scrollbar
+// hidden. Touch devices keep their native momentum scrolling.
+function enableDragScroll(el) {
+  if (!el || el.dataset.dragScroll) return;
+  el.dataset.dragScroll = '1';
+
+  let dragging = false;
+  let activePointer = null;
+  let startX = 0;
+  let startLeft = 0;
+
+  const updateCursor = () => {
+    el.classList.toggle('is-scrollable', el.scrollWidth > el.clientWidth + 2);
+  };
+  el.addEventListener('pointerenter', updateCursor);
+  el.addEventListener('mousemove', updateCursor);
+
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    if (el.scrollWidth <= el.clientWidth + 2) return;
+    dragging = true;
+    activePointer = e.pointerId;
+    startX = e.clientX;
+    startLeft = el.scrollLeft;
+    el.setPointerCapture(e.pointerId);
+  });
+
+  el.addEventListener('pointermove', (e) => {
+    if (!dragging || e.pointerId !== activePointer) return;
+    const dx = e.clientX - startX;
+    if (Math.abs(dx) > 3) el.classList.add('is-dragging');
+    if (el.classList.contains('is-dragging')) el.scrollLeft = startLeft - dx;
+  });
+
+  const endDrag = (e) => {
+    if (!dragging || e.pointerId !== activePointer) return;
+    dragging = false;
+    activePointer = null;
+    el.classList.remove('is-dragging');
+    try { el.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+  };
+  el.addEventListener('pointerup', endDrag);
+  el.addEventListener('pointercancel', endDrag);
+}
+
 // ── Chat & Sync Handlers ────────────────────────────────────
 
 function updateChatUI() {
@@ -184,11 +248,21 @@ function updateChatUI() {
   // The chat is only for teammates wiring the same board together: it shows
   // during a guess phase and only when more than one player of the team is at
   // the board (3-player mode never has collaborators, so it stays hidden).
+  // Offline teammates are excluded here — unlike the ready tally, which counts
+  // them because the server keeps them on the team — so we never open a chat
+  // channel to someone who is not there.
+  const onlineMembers = s
+    ? s.players.filter(p => p.team === s.myTeam && p.isOnline).length
+    : 0;
+  const wiringOnline = s && (s.phase === 'GUESS_BOTH' || s.myTeam === s.currentTeamTurn)
+    ? Math.max(1, onlineMembers - 1)
+    : Math.max(1, onlineMembers);
+
   const canChat = !!s
     && s.mode === 'team'
     && typeof s.phase === 'string' && s.phase.startsWith('GUESS')
     && s.myRole !== 'encryptor'
-    && (s.activeGuessersCount || 0) > 1;
+    && wiringOnline > 1;
 
   if (!canChat) {
     container.style.display = 'none';
@@ -398,8 +472,14 @@ $('btn-leave-room')?.addEventListener('click', () => {
 
 
 
-$('team-a-col').addEventListener('click', () => send({ type: 'switch-team', target: 'A' }));
-$('team-b-col').addEventListener('click', () => send({ type: 'switch-team', target: 'B' }));
+$('team-a-col').addEventListener('click', (e) => {
+  if (e.target.closest('[data-kick]')) return; // kicking must not switch teams
+  send({ type: 'switch-team', target: 'A' });
+});
+$('team-b-col').addEventListener('click', (e) => {
+  if (e.target.closest('[data-kick]')) return;
+  send({ type: 'switch-team', target: 'B' });
+});
 
 // ── Game Details / Kick ─────────────────────────────────────
 
@@ -536,6 +616,14 @@ function requestKick(targetId) {
     onOk: () => send({ type: 'kick', targetId, reset: true }),
   });
 }
+
+// Lobby kick buttons (host only) — same requestKick flow as the in-game
+// details panel; in the lobby the kick never needs a reset confirmation.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.lobby-kick');
+  if (!btn) return;
+  requestKick(btn.dataset.kick);
+});
 
 // ── Confirm Dialog ──────────────────────────────────────────
 
@@ -689,8 +777,11 @@ function renderLobby() {
 
 function renderTeamList(ulId, players, myId, isHost) {
   $(ulId).innerHTML = players.map(p => {
-    let html = `<li><span style="opacity: ${p.isOnline ? 1 : 0.5}">${esc(p.name)}${p.id === myId ? ' (bạn)' : ''}${p.isHost ? ' <span class="lobby-player-host" style="font-size:10px; margin-left:4px;">Chủ phòng</span>' : ''}${!p.isOnline ? ' (Offline)' : ''}</span></li>`;
-    return html;
+    // Same kick button as the in-game details panel, for the host only.
+    const kickBtn = isHost && p.id !== myId
+      ? `<button class="btn-kick lobby-kick" data-kick="${esc(p.id)}" title="Mời khỏi phòng">Kick</button>`
+      : '';
+    return `<li class="lobby-player-row"><span style="opacity: ${p.isOnline ? 1 : 0.5}">${esc(p.name)}${p.id === myId ? ' (bạn)' : ''}${p.isHost ? ' <span class="lobby-player-host" style="font-size:10px; margin-left:4px;">Chủ phòng</span>' : ''}${!p.isOnline ? ' (Offline)' : ''}</span>${kickBtn}</li>`;
   }).join('');
 }
 
@@ -925,6 +1016,21 @@ function renderEncryptPhase(area) {
     // Auto-focus first input
     setTimeout(() => $('clue-0')?.focus(), 100);
 
+    // Stream the clues to the server while typing, so if the host kicks this
+    // encryptor mid-round the server can submit what they had already written
+    // (see server: clue-draft / forceSubmitKickedEncryptor).
+    pendingDraftFlush = sendClueDraft;
+    let draftTimer = null;
+    [0, 1, 2].forEach(i => {
+      const input = $(`clue-${i}`);
+      if (!input) return;
+      input.addEventListener('input', () => {
+        clearTimeout(draftTimer);
+        draftTimer = setTimeout(sendClueDraft, 300);
+      });
+      input.addEventListener('blur', sendClueDraft);
+    });
+
     // Enter key navigation
     [0, 1, 2].forEach(i => {
       const input = $(`clue-${i}`);
@@ -976,7 +1082,10 @@ function renderGuessPhase(area) {
 
   const guessType = getMyGuessType(s);
   
-  const phaseKey = s.phase + '_' + guessType;
+  // myRole is part of the key: when a kick rotates the encryptor mid-guess,
+  // that player must re-render (and stop seeing a stale wire board) even
+  // though the phase itself did not change.
+  const phaseKey = s.phase + '_' + guessType + '_' + s.myRole;
   if (area.dataset.renderedPhase === phaseKey) {
     const taskContainer = document.getElementById('wire-task');
     if (taskContainer) taskContainer.dispatchEvent(new CustomEvent('sync-wires'));
@@ -1871,6 +1980,9 @@ function esc(str) {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  // Only the "Lịch sử gợi ý" panels get the hidden drag-scroll.
+  document.querySelectorAll('.history-content').forEach(enableDragScroll);
+
   const url = new URL(window.location);
   const room = url.searchParams.get('room');
   if (room) {
